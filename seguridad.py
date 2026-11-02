@@ -10,9 +10,10 @@ from fastapi.security import OAuth2PasswordBearer
 
 from database import obtener_conexion
 
-CLAVE_SECRETA = os.getenv(
-    "TALLER_CLAVE_SECRETA", "taller-mecanico-clave-de-desarrollo-cambiar-en-produccion"
-)
+CLAVE_SECRETA = os.getenv("TALLER_CLAVE_SECRETA")
+if not CLAVE_SECRETA:
+    raise RuntimeError("Falta la variable de entorno TALLER_CLAVE_SECRETA (ver README.md)")
+
 ALGORITMO = "HS256"
 MINUTOS_EXPIRACION = 60
 ITERACIONES = 200_000
@@ -81,7 +82,9 @@ def obtener_usuario_actual(token: str = Depends(oauth2_esquema)) -> dict:
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
-        datos = jwt.decode(token, CLAVE_SECRETA, algorithms=[ALGORITMO])
+        datos = jwt.decode(
+            token, CLAVE_SECRETA, algorithms=[ALGORITMO], options={"require": ["exp", "sub"]}
+        )
     except jwt.PyJWTError:
         raise no_autorizado
     usuario = buscar_usuario(datos.get("sub", ""))

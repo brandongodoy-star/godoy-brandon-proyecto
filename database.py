@@ -24,10 +24,14 @@ def obtener_conexion():
 
 
 def inicializar_bd():
-    """Crea la base con crear_bd.sql solo si todavía no existe."""
-    if os.path.exists(RUTA_BD):
-        return
+    """Crea la base con crear_bd.sql solo si todavía no tiene tablas."""
     with open(RUTA_SCRIPT, encoding="utf-8") as archivo:
         script = archivo.read()
     with obtener_conexion() as con:
-        con.executescript(script)
+        tiene_tablas = con.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' LIMIT 1"
+        ).fetchone()
+        if tiene_tablas:
+            return
+        # En una sola transacción: si el script falla no queda una base a medio crear
+        con.executescript(f"BEGIN;\n{script}\nCOMMIT;")

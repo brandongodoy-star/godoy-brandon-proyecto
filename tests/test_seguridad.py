@@ -1,14 +1,20 @@
 import os
-import tempfile
+import subprocess
+import sys
+from datetime import datetime, timedelta, timezone
 
-# La base de pruebas va a una carpeta temporal para no tocar taller.db
-os.environ["TALLER_BD"] = os.path.join(tempfile.mkdtemp(), "prueba.db")
-
+import jwt
 import pytest
 from fastapi.testclient import TestClient
 
 from main import app
-from seguridad import buscar_usuario, encriptar_password, verificar_password
+from seguridad import (
+    ALGORITMO,
+    CLAVE_SECRETA,
+    buscar_usuario,
+    encriptar_password,
+    verificar_password,
+)
 
 
 @pytest.fixture(scope="module")
@@ -61,3 +67,30 @@ def test_sin_token_o_token_falso(cliente):
     assert cliente.get("/auth/yo").status_code == 401
     r = cliente.get("/auth/yo", headers={"Authorization": "Bearer token.falso.123"})
     assert r.status_code == 401
+
+
+def test_token_sin_expiracion_se_rechaza(cliente):
+    token = jwt.encode({"sub": "admin"}, CLAVE_SECRETA, algorithm=ALGORITMO)
+    r = cliente.get("/auth/yo", headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 401
+
+
+def test_token_expirado_se_rechaza(cliente):
+    expira = datetime.now(timezone.utc) - timedelta(minutes=1)
+    token = jwt.encode({"sub": "admin", "exp": expira}, CLAVE_SECRETA, algorithm=ALGORITMO)
+    r = cliente.get("/auth/yo", headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 401
+
+
+def test_sin_clave_secreta_la_app_no_arranca():
+    entorno = {k: v for k, v in os.environ.items() if k != "TALLER_CLAVE_SECRETA"}
+    carpeta = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    r = subprocess.run(
+        [sys.executable, "-c", "import seguridad"],
+        cwd=carpeta,
+        env=entorno,
+        capture_output=True,
+        text=True,
+    )
+    assert r.returncode != 0
+    assert "TALLER_CLAVE_SECRETA" in r.stderr
