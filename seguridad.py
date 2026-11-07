@@ -32,9 +32,11 @@ def encriptar_password(password: str) -> str:
 def verificar_password(password: str, password_hash: str) -> bool:
     try:
         _, iteraciones, sal, esperado = password_hash.split("$")
+        digest = hashlib.pbkdf2_hmac(
+            "sha256", password.encode(), bytes.fromhex(sal), int(iteraciones)
+        )
     except ValueError:
         return False
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), bytes.fromhex(sal), int(iteraciones))
     return hmac.compare_digest(digest.hex(), esperado)
 
 
@@ -87,7 +89,7 @@ def obtener_usuario_actual(token: str = Depends(oauth2_esquema)) -> dict:
         )
     except jwt.PyJWTError:
         raise no_autorizado
-    usuario = buscar_usuario(datos.get("sub", ""))
+    usuario = buscar_usuario(datos["sub"])
     if usuario is None:
         raise no_autorizado
     return {"id": usuario["id"], "username": usuario["username"]}

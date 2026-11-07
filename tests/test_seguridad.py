@@ -50,6 +50,11 @@ def test_mismo_password_distinto_hash():
     assert verificar_password("abc123", encriptar_password("abc123"))
 
 
+@pytest.mark.parametrize("hash_danado", ["texto", "a$b$c", "a$no_numero$00$c", "a$1$zz$c"])
+def test_hash_danado_no_rompe_la_verificacion(hash_danado):
+    assert verificar_password("abc123", hash_danado) is False
+
+
 def test_login_correcto_y_ruta_protegida(cliente):
     r = cliente.post("/auth/login", data={"username": "admin", "password": "secreto123"})
     assert r.status_code == 200

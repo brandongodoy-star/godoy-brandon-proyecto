@@ -33,5 +33,4 @@ def inicializar_bd():
         ).fetchone()
         if tiene_tablas:
             return
-        # En una sola transacción: si el script falla no queda una base a medio crear
         con.executescript(f"BEGIN;\n{script}\nCOMMIT;")

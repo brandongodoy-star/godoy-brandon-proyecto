@@ -23,11 +23,8 @@ app = FastAPI(
 )
 
 app.include_router(auth.router)
-# Aquí se registran los demás routers cuando estén listos, por ejemplo:
-# app.include_router(clientes.router)
 
 
-# ---------- Manejo centralizado de errores ----------
 @app.exception_handler(sqlite3.IntegrityError)
 def manejar_integridad(request: Request, error: sqlite3.IntegrityError):
     if request.method == "DELETE":
