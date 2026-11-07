@@ -6,7 +6,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from database import inicializar_bd
-from routers import auth
+from routers import auth, clientes, mecanicos, ordenes, repuestos, vehiculos
 
 
 @asynccontextmanager
@@ -23,10 +23,20 @@ app = FastAPI(
 )
 
 app.include_router(auth.router)
+app.include_router(clientes.router)
+app.include_router(vehiculos.router)
+app.include_router(mecanicos.router)
+app.include_router(repuestos.router)
+app.include_router(ordenes.router)
 
 
 @app.exception_handler(sqlite3.IntegrityError)
 def manejar_integridad(request: Request, error: sqlite3.IntegrityError):
+    if "UNIQUE" in str(error):
+        return JSONResponse(
+            status_code=409,
+            content={"detail": "Ya existe un registro con ese valor (por ejemplo, la placa)"},
+        )
     if request.method == "DELETE":
         mensaje = "No se puede eliminar: hay otros registros que dependen de este"
     else:
