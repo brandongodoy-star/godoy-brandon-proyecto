@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Taller Mecánico</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="/estilos.css" />
+
+  <!-- Aplica el tema guardado antes de pintar, para que la página no parpadee. -->
+  <script>
+    try {
+      const tema = localStorage.getItem("taller-tema");
+      if (tema) document.documentElement.dataset.theme = tema;
+    } catch (error) {}
+  </script>
+</head>
+<body>
+
+  <!-- ===================== VISTA: ACCESO ===================== -->
+  <section id="vista-login" class="login" hidden>
+    <div class="login-marca">
+      <div class="logo">
+        <span class="logo-icono" data-icono="mecanicos"></span>
+        <span>Taller Mecánico</span>
+      </div>
+      <div class="login-marca-texto">
+        <h1>Cada vehículo, de la recepción a la entrega.</h1>
+        <p>
+          Registre clientes y vehículos, asigne mecánicos, controle el inventario de
+          repuestos y siga cada orden de servicio hasta entregarla.
+        </p>
+        <ul class="login-lista">
+          <li><span data-icono="check"></span> Órdenes por estado en un solo tablero</li>
+          <li><span data-icono="check"></span> Inventario que se descuenta solo</li>
+          <li><span data-icono="check"></span> Total de cada orden al instante</li>
+        </ul>
+      </div>
+      <p class="login-pie">FastAPI · SQLite · Proyecto de curso</p>
+    </div>
+
+    <div class="login-panel">
+      <button type="button" class="boton boton-fantasma boton-tema" data-cambiar-tema></button>
+      <div class="tarjeta-login">
+        <div class="pestanas" role="tablist">
+          <button type="button" class="pestana activa" data-modo="entrar" role="tab">Iniciar sesión</button>
+          <button type="button" class="pestana" data-modo="registrar" role="tab">Crear cuenta</button>
+        </div>
+
+        <h2 id="titulo-acceso">Bienvenido de nuevo</h2>
+        <p id="texto-acceso" class="texto-tenue">Ingrese sus datos para continuar.</p>
+
+        <form id="formulario-acceso" class="formulario-acceso">
+          <div class="campo">
+            <label for="campo-usuario">Usuario</label>
+            <input id="campo-usuario" name="usuario" type="text" autocomplete="username"
+                   required minlength="3" maxlength="30" pattern="[A-Za-z0-9_]+"
+                   title="Solo letras, números y guion bajo" />
+          </div>
+          <div class="campo">
+            <label for="campo-clave">Contraseña</label>
+            <input id="campo-clave" name="clave" type="password" autocomplete="current-password"
+                   required minlength="6" maxlength="72" />
+          </div>
+          <button type="submit" id="boton-acceso" class="boton boton-primario boton-bloque">
+            Iniciar sesión
+          </button>
+        </form>
+
+        <p id="mensaje-acceso" class="mensaje-error" aria-live="polite"></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== VISTA: APLICACIÓN ===================== -->
+  <div id="vista-app" class="app" hidden>
+    <aside class="lateral">
+      <div class="logo">
+        <span class="logo-icono" data-icono="mecanicos"></span>
+        <span>Taller Mecánico</span>
+      </div>
+
+      <nav id="menu" class="menu" aria-label="Secciones"></nav>
+
+      <div class="lateral-pie">
+        <div class="usuario">
+          <span id="avatar-usuario" class="avatar"></span>
+          <div>
+            <strong id="nombre-usuario"></strong>
+            <span class="texto-tenue">Sesión iniciada</span>
+          </div>
+        </div>
+        <div class="lateral-acciones">
+          <button type="button" class="boton boton-fantasma boton-tema" data-cambiar-tema></button>
+          <button type="button" id="boton-salir" class="boton boton-fantasma">
+            <span data-icono="salir"></span><span class="texto-boton">Salir</span>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <main class="contenido">
+      <header class="encabezado">
+        <div>
+          <p id="subtitulo-vista" class="subtitulo"></p>
+          <h1 id="titulo-vista"></h1>
+        </div>
+        <div id="acciones-vista" class="acciones"></div>
+      </header>
+      <div id="vista" class="vista" aria-live="polite"></div>
+    </main>
+  </div>
+
+  <dialog id="dialogo" class="dialogo"></dialog>
+  <dialog id="confirmacion" class="dialogo dialogo-chico"></dialog>
+  <div id="avisos" class="avisos" popover="manual" aria-live="polite"></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

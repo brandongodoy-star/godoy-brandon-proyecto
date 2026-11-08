@@ -26,9 +26,22 @@ API de un taller mecánico hecha con FastAPI y SQLite.
    uvicorn main:app --reload
    ```
 
-   La documentación queda en http://127.0.0.1:8000/docs
+   Si el puerto 8000 está ocupado por otra API, agrega `--port 8001` y usa ese número en las direcciones.
 
-4. En `/docs`, registra un usuario en `POST /auth/registro` y luego usa el botón **Authorize** para iniciar sesión. Todos los módulos piden ese inicio de sesión.
+4. Abre http://127.0.0.1:8000 para usar la interfaz web. La primera vez elige **Crear cuenta**.
+
+   La documentación de la API queda en http://127.0.0.1:8000/docs. Ahí registra un usuario en `POST /auth/registro` y luego usa el botón **Authorize** para iniciar sesión. Todos los módulos piden ese inicio de sesión.
+
+## Interfaz web
+
+La carpeta `frontend/` tiene la página que FastAPI sirve en la raíz (`index.html`, `estilos.css` y `app.js`, sin librerías externas):
+
+- **Resumen:** órdenes por estado, trabajo en curso, repuestos con poca existencia y carga de cada mecánico.
+- **Órdenes:** tablero con una columna por estado. Al abrir una orden se ven sus datos, se agregan o quitan repuestos, se ve el total y se pasa al siguiente estado.
+- **Clientes, Vehículos, Mecánicos y Repuestos:** tablas con búsqueda y formularios para crear, editar y eliminar.
+- Modo claro u oscuro, y diseño adaptado al celular.
+
+La sesión se guarda solo mientras la pestaña esté abierta.
 
 ## Módulos
 

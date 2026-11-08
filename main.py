@@ -1,9 +1,11 @@
 import sqlite3
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from database import inicializar_bd
 from routers import auth, clientes, mecanicos, ordenes, repuestos, vehiculos
@@ -52,6 +54,6 @@ def manejar_validacion(request: Request, error: RequestValidationError):
     return JSONResponse(status_code=400, content={"detail": errores})
 
 
-@app.get("/", tags=["Inicio"])
-def inicio():
-    return {"mensaje": "API del Taller Mecánico funcionando. Documentación en /docs"}
+# La interfaz web se sirve en la raíz. Va al final para no tapar las rutas de la API.
+CARPETA_FRONTEND = Path(__file__).resolve().parent / "frontend"
+app.mount("/", StaticFiles(directory=CARPETA_FRONTEND, html=True), name="frontend")
