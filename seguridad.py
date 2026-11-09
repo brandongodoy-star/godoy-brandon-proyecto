@@ -8,11 +8,31 @@ import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 
-from database import obtener_conexion
+from database import CARPETA, obtener_conexion
 
-CLAVE_SECRETA = os.getenv("TALLER_CLAVE_SECRETA")
-if not CLAVE_SECRETA:
-    raise RuntimeError("Falta la variable de entorno TALLER_CLAVE_SECRETA (ver README.md)")
+RUTA_CLAVE = os.getenv("TALLER_ARCHIVO_CLAVE", os.path.join(CARPETA, ".clave_secreta"))
+
+
+def cargar_clave_secreta() -> str:
+    """Usa TALLER_CLAVE_SECRETA si existe. Si no, una clave al azar guardada en .clave_secreta.
+
+    El archivo se crea la primera vez y Git lo ignora, así la clave nunca queda en el repositorio.
+    """
+    clave = os.getenv("TALLER_CLAVE_SECRETA")
+    if clave:
+        return clave
+    if os.path.exists(RUTA_CLAVE):
+        with open(RUTA_CLAVE, encoding="utf-8") as archivo:
+            clave = archivo.read().strip()
+        if clave:
+            return clave
+    clave = secrets.token_hex(32)
+    with open(RUTA_CLAVE, "w", encoding="utf-8") as archivo:
+        archivo.write(clave)
+    return clave
+
+
+CLAVE_SECRETA = cargar_clave_secreta()
 
 ALGORITMO = "HS256"
 MINUTOS_EXPIRACION = 60

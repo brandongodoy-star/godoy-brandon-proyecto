@@ -12,15 +12,7 @@ API de un taller mecánico hecha con FastAPI y SQLite.
    pip install -r requirements.txt
    ```
 
-2. Define la clave secreta que firma los tokens. La app no arranca sin ella y no debe subirse a Git:
-
-   ```powershell
-   $env:TALLER_CLAVE_SECRETA = python -c "import secrets; print(secrets.token_hex(32))"
-   ```
-
-   La variable dura lo que dure esa terminal. Si cambias la clave, los tokens anteriores dejan de servir.
-
-3. Inicia la API. La primera vez crea `taller.db` a partir de `crear_bd.sql`:
+2. Inicia la API. La primera vez crea `taller.db` a partir de `crear_bd.sql` y la clave secreta que firma los tokens:
 
    ```powershell
    uvicorn main:app --reload
@@ -28,7 +20,9 @@ API de un taller mecánico hecha con FastAPI y SQLite.
 
    Si el puerto 8000 está ocupado por otra API, agrega `--port 8001` y usa ese número en las direcciones.
 
-4. Abre http://127.0.0.1:8000 para usar la interfaz web. La primera vez elige **Crear cuenta**.
+   La clave se guarda en el archivo `.clave_secreta`, que Git ignora para que nunca se suba. Si lo borras se crea una nueva y los tokens anteriores dejan de servir. En un servidor real se puede usar la variable de entorno `TALLER_CLAVE_SECRETA` en su lugar.
+
+3. Abre http://127.0.0.1:8000 para usar la interfaz web. La primera vez elige **Crear cuenta**.
 
    La documentación de la API queda en http://127.0.0.1:8000/docs. Ahí registra un usuario en `POST /auth/registro` y luego usa el botón **Authorize** para iniciar sesión. Todos los módulos piden ese inicio de sesión.
 

@@ -87,15 +87,24 @@ def test_token_expirado_se_rechaza(cliente):
     assert r.status_code == 401
 
 
-def test_sin_clave_secreta_la_app_no_arranca():
+def test_sin_variable_se_crea_y_reutiliza_una_clave(tmp_path):
+    archivo = tmp_path / ".clave_secreta"
     entorno = {k: v for k, v in os.environ.items() if k != "TALLER_CLAVE_SECRETA"}
+    entorno["TALLER_ARCHIVO_CLAVE"] = str(archivo)
     carpeta = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    r = subprocess.run(
-        [sys.executable, "-c", "import seguridad"],
-        cwd=carpeta,
-        env=entorno,
-        capture_output=True,
-        text=True,
-    )
-    assert r.returncode != 0
-    assert "TALLER_CLAVE_SECRETA" in r.stderr
+
+    def clave_al_arrancar():
+        r = subprocess.run(
+            [sys.executable, "-c", "import seguridad; print(seguridad.CLAVE_SECRETA)"],
+            cwd=carpeta,
+            env=entorno,
+            capture_output=True,
+            text=True,
+        )
+        assert r.returncode == 0, r.stderr
+        return r.stdout.strip()
+
+    primera = clave_al_arrancar()
+    assert len(primera) == 64
+    assert archivo.read_text(encoding="utf-8") == primera
+    assert clave_al_arrancar() == primera
