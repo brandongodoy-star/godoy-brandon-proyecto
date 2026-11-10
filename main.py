@@ -49,6 +49,15 @@ app.include_router(repuestos.router)
 app.include_router(ordenes.router)
 
 
+@app.middleware("http")
+async def revisar_version_del_frontend(request: Request, call_next):
+    """Hace que el navegador pregunte siempre si la interfaz cambió y no use una copia vieja."""
+    respuesta = await call_next(request)
+    if request.url.path == "/" or request.url.path.endswith((".html", ".js", ".css")):
+        respuesta.headers["Cache-Control"] = "no-cache"
+    return respuesta
+
+
 @app.exception_handler(sqlite3.IntegrityError)
 def manejar_integridad(request: Request, error: sqlite3.IntegrityError):
     if "UNIQUE" in str(error):
