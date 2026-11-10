@@ -22,20 +22,67 @@ API de un taller mecánico hecha con FastAPI y SQLite.
 
    La clave se guarda en el archivo `.clave_secreta`, que Git ignora para que nunca se suba. Si lo borras se crea una nueva y los tokens anteriores dejan de servir. En un servidor real se puede usar la variable de entorno `TALLER_CLAVE_SECRETA` en su lugar.
 
-3. Abre http://127.0.0.1:8000 para usar la interfaz web. La primera vez elige **Crear cuenta**.
+3. Abre http://127.0.0.1:8000 e inicia sesión con una de las cuentas de la empresa (abajo).
 
-   La documentación de la API queda en http://127.0.0.1:8000/docs. Ahí registra un usuario en `POST /auth/registro` y luego usa el botón **Authorize** para iniciar sesión. Todos los módulos piden ese inicio de sesión.
+   La documentación de la API queda en http://127.0.0.1:8000/docs. Ahí usa el botón **Authorize** con una de esas cuentas.
+
+Si ya tenías una `taller.db` de antes, la API la actualiza sola al arrancar sin borrar tus datos. Las cuentas que ya existían quedan como administrador.
+
+## Cuentas y roles
+
+No hay registro público: las cuentas las entrega la empresa. La primera vez se crean estas tres:
+
+| Usuario | Contraseña | Rol | Qué puede hacer |
+|---|---|---|---|
+| `admin` | `Admin2026!` | Administración | Todo, y además crear y eliminar cuentas |
+| `recepcion` | `Recepcion2026!` | Recepción | Clientes, vehículos, mecánicos, repuestos y órdenes |
+| `mecanico` | `Mecanico2026!` | Mecánico | Solo su área: sus trabajos, sus reportes y su perfil |
+
+**Cambie estas contraseñas** después de entrar (`POST /auth/cambiar-password`, o desde «Mi perfil» en el caso del mecánico). La cuenta `mecanico` queda vinculada al primer mecánico activo. Para otros mecánicos, el administrador crea una cuenta en **Cuentas** y elige su ficha.
+
+## Área del mecánico
+
+El mecánico entra a una interfaz limitada, sin precios ni datos de contacto de los clientes:
+
+- **Mis trabajos:** los vehículos que le asignó recepción. Puede empezar la reparación, enviar un aviso a recepción si todavía no está listo (por ejemplo, «falta un repuesto») y marcarlo como listo con una nota. Cada aviso llega a recepción como notificación.
+- **Reportes:** informa fallas de equipo o herramientas, falta de repuestos, problemas de seguridad u otros. También llegan a recepción.
+- **Mi perfil:** sus datos personales, sus números, su historial de créditos y el cambio de contraseña.
+
+### Créditos (fama) y niveles
+
+Al entregar una orden, recepción califica el trabajo. La calificación suma o resta créditos al mecánico, y los autos más valiosos valen más:
+
+| Calificación | Estándar | Premium | Lujo |
+|---|---|---|---|
+| Excelente | +20 | +30 | +40 |
+| Bien | +10 | +15 | +20 |
+| Con problemas | -10 | -15 | -20 |
+| Hubo que rehacerlo | -25 | -37 | -50 |
+
+Los créditos nunca bajan de 0. Con más créditos el mecánico sube de nivel y puede recibir mejores autos:
+
+| Nivel | Desde | Autos que puede trabajar |
+|---|---|---|
+| Aprendiz | 0 | Estándar |
+| Técnico | 100 | Estándar y Premium |
+| Maestro | 250 | Estándar, Premium y Lujo |
+
+Recepción no puede asignar un auto de una categoría mayor al nivel del mecánico. Si el mecánico baja de nivel, conserva los trabajos que ya tenía. Las reglas están en `creditos.py`.
+
+La pantalla de recepción para ver las notificaciones y los reportes se hará después. Por ahora ya existen en la API: `GET /notificaciones` y `GET /reportes`.
 
 ## Interfaz web
 
-La carpeta `frontend/` tiene la página que FastAPI sirve en la raíz (`index.html`, `estilos.css` y `app.js`, sin librerías externas):
+La carpeta `frontend/` tiene la página que FastAPI sirve en la raíz (`index.html`, `estilos.css` y `app.js`, sin librerías externas). Lo que se ve depende del rol:
 
-- **Resumen:** órdenes por estado, trabajo en curso, repuestos con poca existencia y carga de cada mecánico.
-- **Órdenes:** tablero con una columna por estado. Al abrir una orden se ven sus datos, se agregan o quitan repuestos, se ve el total y se pasa al siguiente estado.
-- **Clientes, Vehículos, Mecánicos y Repuestos:** tablas con búsqueda y formularios para crear, editar y eliminar.
-- Modo claro u oscuro, y diseño adaptado al celular.
+- **Administración y recepción:**
+  - **Resumen:** órdenes por estado, trabajo en curso, repuestos con poca existencia, y nivel y carga de cada mecánico.
+  - **Órdenes:** tablero con una columna por estado. Al abrir una orden se ven sus datos, se agregan o quitan repuestos, se ve el total y se pasa al siguiente estado. Para entregarla hay que calificar el trabajo.
+  - **Clientes, Vehículos, Mecánicos y Repuestos:** tablas con búsqueda y formularios para crear, editar y eliminar.
+  - **Cuentas:** solo para administración.
+- **Mecánico:** el área descrita arriba.
 
-La sesión se guarda solo mientras la pestaña esté abierta.
+Tiene modo claro u oscuro y diseño adaptado al celular. La sesión se guarda solo mientras la pestaña esté abierta.
 
 ## Módulos
 
@@ -46,13 +93,16 @@ La sesión se guarda solo mientras la pestaña esté abierta.
 | Mecánicos | `/mecanicos` | Filtrar con `?solo_activos=true` |
 | Repuestos | `/repuestos` | |
 | Órdenes de servicio | `/ordenes` | Filtrar por `?estado=` o `?vehiculo_id=` |
+| Cuentas (solo administración) | `/usuarios` | Sin edición: se crean y se eliminan |
+| Área del mecánico | `/mecanico/...` | Perfil, trabajos, avisos y reportes del mecánico |
+| Notificaciones y reportes | `/notificaciones`, `/reportes` | Para administración y recepción |
 
 Rutas propias de una orden:
 
 - `POST /ordenes/{id}/repuestos`: agrega un repuesto y lo descuenta del inventario.
 - `GET /ordenes/{id}/repuestos`: lista los repuestos usados en la orden.
 - `DELETE /ordenes/{id}/repuestos/{detalle_id}`: quita un repuesto y lo devuelve al inventario.
-- `POST /ordenes/{id}/avanzar`: pasa al siguiente estado (`recibido` → `en reparacion` → `listo` → `entregado`).
+- `POST /ordenes/{id}/avanzar`: pasa al siguiente estado (`recibido` → `en reparacion` → `listo` → `entregado`). Para entregar se envía `{"calificacion": "excelente" | "bien" | "con problemas" | "rehacer"}`.
 - `GET /ordenes/{id}/total`: suma la mano de obra y los repuestos.
 
 Reglas del taller:

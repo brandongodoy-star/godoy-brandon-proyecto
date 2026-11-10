@@ -10,12 +10,10 @@ numeros = count(1)
 
 
 @pytest.fixture(scope="module")
-def api():
-    """Cliente HTTP que ya inició sesión."""
+def api(entrar):
+    """Cliente HTTP que ya inició sesión con la cuenta de recepción."""
     with TestClient(app) as c:
-        c.post("/auth/registro", json={"username": "recepcion", "password": "taller123"})
-        r = c.post("/auth/login", data={"username": "recepcion", "password": "taller123"})
-        c.headers["Authorization"] = f"Bearer {r.json()['access_token']}"
+        c.headers.update(entrar(c, "recepcion"))
         yield c
 
 
@@ -212,9 +210,18 @@ def test_no_se_quita_un_repuesto_de_otra_orden(api):
 
 def test_avanzar_estado_hasta_entregar(api):
     orden = nueva_orden(api)
-    estados = [api.post(f"/ordenes/{orden['id']}/avanzar").json()["estado"] for _ in range(3)]
-    assert estados == ["en reparacion", "listo", "entregado"]
-    assert api.post(f"/ordenes/{orden['id']}/avanzar").status_code == 400
+    ruta = f"/ordenes/{orden['id']}/avanzar"
+    estados = [api.post(ruta).json()["estado"] for _ in range(2)]
+    assert estados == ["en reparacion", "listo"]
+
+    # Para entregar hay que calificar el trabajo
+    r = api.post(ruta)
+    assert r.status_code == 400
+    assert "Califique" in r.json()["detail"]
+    entregada = api.post(ruta, json={"calificacion": "bien"}).json()
+    assert entregada["estado"] == "entregado"
+    assert entregada["calificacion"] == "bien"
+    assert api.post(ruta, json={"calificacion": "bien"}).status_code == 400
 
 
 def test_orden_lista_o_entregada_no_se_modifica(api):

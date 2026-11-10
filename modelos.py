@@ -1,9 +1,15 @@
 from datetime import date
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
+
+from creditos import nivel_de
 
 EstadoOrden = Literal["recibido", "en reparacion", "listo", "entregado"]
+Categoria = Literal["estandar", "premium", "lujo"]
+Calificacion = Literal["excelente", "bien", "con problemas", "rehacer"]
+Rol = Literal["administrador", "recepcion", "mecanico"]
+TipoReporte = Literal["equipo", "repuestos", "seguridad", "otro"]
 
 
 class Entrada(BaseModel):
@@ -34,6 +40,7 @@ class VehiculoEntrada(Entrada):
     modelo: str = Field(min_length=1, max_length=50)
     anio: int = Field(ge=1950)
     cliente_id: int = Field(gt=0)
+    categoria: Categoria = "estandar"
 
     @field_validator("placa")
     @classmethod
@@ -57,10 +64,26 @@ class MecanicoEntrada(Entrada):
     nombre: str = Field(min_length=3, max_length=100)
     especialidad: str | None = Field(default=None, max_length=60)
     activo: bool = True
+    telefono: str | None = Field(default=None, max_length=20)
+    correo: str | None = Field(default=None, max_length=100, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    fecha_contratacion: date | None = None
+
+    @field_validator("fecha_contratacion")
+    @classmethod
+    def contratacion_no_futura(cls, valor: date | None) -> date | None:
+        if valor and valor > date.today():
+            raise ValueError("La fecha de contratación no puede ser futura")
+        return valor
 
 
 class MecanicoRespuesta(MecanicoEntrada):
     id: int
+    creditos: int
+
+    @computed_field
+    @property
+    def nivel(self) -> str:
+        return nivel_de(self.creditos)["nombre"]
 
 
 # ---------- Repuestos ----------
@@ -93,6 +116,13 @@ class OrdenEntrada(Entrada):
 class OrdenRespuesta(OrdenEntrada):
     id: int
     estado: EstadoOrden
+    calificacion: Calificacion | None = None
+
+
+class AvanceEntrada(Entrada):
+    """Al pasar una orden a «entregado», recepción califica el trabajo del mecánico."""
+
+    calificacion: Calificacion | None = None
 
 
 class DetalleEntrada(Entrada):
@@ -115,3 +145,132 @@ class TotalOrden(BaseModel):
     mano_obra: float
     repuestos: float
     total: float
+
+
+# ---------- Cuentas ----------
+class UsuarioEntrada(Entrada):
+    username: str = Field(min_length=3, max_length=30, pattern=r"^[a-zA-Z0-9_]+$")
+    password: str = Field(min_length=6, max_length=72)
+    rol: Rol
+    nombre: str | None = Field(default=None, max_length=100)
+    mecanico_id: int | None = Field(default=None, gt=0)
+
+
+class UsuarioRespuesta(BaseModel):
+    id: int
+    username: str
+    rol: Rol
+    nombre: str | None = None
+    mecanico_id: int | None = None
+    mecanico: str | None = None
+
+
+class CambioPassword(Entrada):
+    password_actual: str = Field(min_length=1, max_length=72)
+    password_nueva: str = Field(min_length=6, max_length=72)
+
+
+# ---------- Área del mecánico ----------
+class NotaEntrada(Entrada):
+    nota: str | None = Field(default=None, max_length=300)
+
+
+class AvisoEntrada(Entrada):
+    mensaje: str = Field(min_length=3, max_length=300)
+
+
+class Trabajo(BaseModel):
+    """Una orden vista por el mecánico: sin precios ni datos de contacto del cliente."""
+
+    id: int
+    estado: EstadoOrden
+    fecha_ingreso: date
+    diagnostico: str | None = None
+    calificacion: Calificacion | None = None
+    placa: str
+    marca: str
+    modelo: str
+    anio: int
+    categoria: Categoria
+    cliente: str
+
+
+class RepuestoDeTrabajo(BaseModel):
+    repuesto: str
+    cantidad: int
+
+
+class TrabajoDetalle(Trabajo):
+    repuestos: list[RepuestoDeTrabajo]
+    creditos: int | None = None
+
+
+class NivelSiguiente(BaseModel):
+    nombre: str
+    minimo: int
+
+
+class Nivel(BaseModel):
+    nombre: str
+    minimo: int
+    categorias: list[Categoria]
+    siguiente: NivelSiguiente | None = None
+
+
+class MovimientoCredito(BaseModel):
+    fecha: str
+    puntos: int
+    motivo: str
+    orden_id: int | None = None
+
+
+class EstadisticasMecanico(BaseModel):
+    por_empezar: int
+    en_reparacion: int
+    listos: int
+    entregados: int
+    calificaciones: dict[str, int]
+
+
+class PerfilMecanico(BaseModel):
+    usuario: str
+    nombre: str
+    especialidad: str | None = None
+    telefono: str | None = None
+    correo: str | None = None
+    fecha_contratacion: date | None = None
+    creditos: int
+    nivel: Nivel
+    estadisticas: EstadisticasMecanico
+    historial: list[MovimientoCredito]
+
+
+# ---------- Reportes y notificaciones ----------
+class ReporteEntrada(Entrada):
+    tipo: TipoReporte
+    titulo: str = Field(min_length=3, max_length=100)
+    descripcion: str = Field(min_length=5, max_length=1000)
+    orden_id: int | None = Field(default=None, gt=0)
+
+
+class ReporteRespuesta(BaseModel):
+    id: int
+    mecanico_id: int
+    mecanico: str
+    orden_id: int | None = None
+    tipo: TipoReporte
+    titulo: str
+    descripcion: str
+    estado: Literal["abierto", "resuelto"]
+    fecha: str
+
+
+class NotificacionRespuesta(BaseModel):
+    id: int
+    tipo: Literal["listo", "avance", "reporte"]
+    mensaje: str
+    orden_id: int | None = None
+    mecanico_id: int | None = None
+    mecanico: str | None = None
+    leida: bool
+    fecha: str

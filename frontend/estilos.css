@@ -25,6 +25,8 @@
   --entregado-suave: #eef0f2;
   --peligro: #c53030;
   --peligro-suave: #fdeaea;
+  --oro: #a16207;
+  --oro-suave: #fdf3d6;
 
   --sombra: 0 1px 2px rgba(20, 22, 26, 0.05), 0 4px 16px rgba(20, 22, 26, 0.06);
   --sombra-alta: 0 12px 40px rgba(20, 22, 26, 0.18);
@@ -60,6 +62,8 @@
     --entregado-suave: #262a30;
     --peligro: #f87171;
     --peligro-suave: #3b1d1d;
+    --oro: #e3b341;
+    --oro-suave: #3a3115;
     --sombra: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 16px rgba(0, 0, 0, 0.25);
     --sombra-alta: 0 12px 40px rgba(0, 0, 0, 0.55);
     color-scheme: dark;
@@ -90,6 +94,8 @@
   --entregado-suave: #262a30;
   --peligro: #f87171;
   --peligro-suave: #3b1d1d;
+  --oro: #e3b341;
+  --oro-suave: #3a3115;
   --sombra: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 16px rgba(0, 0, 0, 0.25);
   --sombra-alta: 0 12px 40px rgba(0, 0, 0, 0.55);
   color-scheme: dark;
@@ -186,12 +192,10 @@ a { color: inherit; }
 .login-panel { position: relative; display: grid; place-items: center; padding: 32px 20px; }
 .login-panel > .boton-tema { position: absolute; top: 20px; right: 20px; }
 .tarjeta-login { width: 100%; max-width: 400px; }
-.tarjeta-login h2 { margin-top: 28px; font-size: 26px; letter-spacing: -0.01em; }
+.tarjeta-login h2 { font-size: 26px; letter-spacing: -0.01em; }
 .tarjeta-login > .texto-tenue { margin-top: 4px; }
 .formulario-acceso { display: grid; gap: 16px; margin: 24px 0 12px; }
-.pestanas { display: inline-flex; padding: 4px; gap: 4px; border-radius: 11px; background: var(--superficie-2); border: 1px solid var(--borde); }
-.pestana { border: 0; background: none; padding: 7px 14px; border-radius: 8px; font-weight: 700; font-size: 14px; color: var(--texto-suave); cursor: pointer; }
-.pestana.activa { background: var(--superficie); color: var(--texto); box-shadow: var(--sombra); }
+.ayuda-acceso { margin-top: 8px; padding-top: 16px; border-top: 1px solid var(--borde); font-size: 13px; color: var(--texto-tenue); }
 
 /* ===================== Estructura ===================== */
 .logo { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 17px; letter-spacing: -0.01em; }
@@ -280,6 +284,11 @@ button.fila-lista:hover { background: var(--superficie-2); }
 .insignia-baja { color: var(--reparacion); background: var(--reparacion-suave); }
 .insignia-peligro { color: var(--peligro); background: var(--peligro-suave); }
 .insignia-neutra { color: var(--entregado); background: var(--entregado-suave); }
+.insignia-premium { color: var(--recibido); background: var(--recibido-suave); }
+.insignia-lujo { color: var(--oro); background: var(--oro-suave); }
+.insignia .icono { width: 13px; height: 13px; }
+.positivo { color: var(--listo); }
+.negativo { color: var(--peligro); }
 
 /* ===================== Tablas ===================== */
 .barra-herramientas { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--borde); flex-wrap: wrap; }
@@ -295,6 +304,7 @@ tbody tr:last-child td { border-bottom: 0; }
 tbody tr:hover td { background: var(--superficie-2); }
 td.numero, th.numero { text-align: right; font-variant-numeric: tabular-nums; }
 td.acciones-fila { width: 1%; white-space: nowrap; text-align: right; }
+td .mono, td .insignia { white-space: nowrap; }
 .celda-doble strong { display: block; }
 .celda-doble span { display: block; font-size: 13px; color: var(--texto-tenue); }
 
@@ -385,10 +395,85 @@ td.acciones-fila { width: 1%; white-space: nowrap; text-align: right; }
 
 .cargando { padding: 48px; text-align: center; color: var(--texto-tenue); }
 
+/* ===================== Calificar al entregar ===================== */
+.opciones-calificacion { display: grid; gap: 10px; }
+.opcion-calificacion {
+  display: flex; align-items: center; gap: 12px; padding: 12px 14px; cursor: pointer;
+  border: 1px solid var(--borde); border-radius: var(--radio-chico); background: var(--superficie);
+}
+.opcion-calificacion:hover { background: var(--superficie-2); }
+.opcion-calificacion:has(input:checked) { border-color: var(--acento); background: var(--acento-suave); }
+.opcion-calificacion input { width: 18px; height: 18px; accent-color: var(--acento); flex: none; }
+.opcion-calificacion .principal { flex: 1; display: grid; }
+.opcion-calificacion .principal span { font-size: 13px; color: var(--texto-tenue); }
+.opcion-calificacion .puntos { font-weight: 800; font-variant-numeric: tabular-nums; }
+.dato .insignia { margin-top: 6px; }
+
+/* ===================== Área del mecánico ===================== */
+.enlace-estadistica { text-decoration: none; transition: border-color 0.15s; }
+.enlace-estadistica:hover { border-color: var(--acento); }
+.tarjeta-orden .arriba .numero-orden { margin-left: auto; }
+.grupo-trabajos { margin-bottom: 28px; }
+.grupo-trabajos > h2 { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; font-size: 16px; font-weight: 800; }
+.grupo-trabajos > h2::before { content: ""; width: 4px; height: 18px; border-radius: 4px; background: var(--acento); }
+.grupo-trabajos .vacio-chico { padding: 4px 0; }
+.rejilla-trabajos { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; }
+
+.lista-repuestos { list-style: none; margin: 0 0 4px; padding: 0; border: 1px solid var(--borde); border-radius: var(--radio-chico); }
+.lista-repuestos li { display: flex; justify-content: space-between; gap: 12px; padding: 10px 12px; font-size: 14px; }
+.lista-repuestos li + li { border-top: 1px solid var(--borde); }
+.mensaje-recepcion { margin-top: 20px; }
+.nota-info {
+  display: flex; align-items: center; gap: 10px; margin-top: 20px; padding: 12px 14px;
+  border-radius: var(--radio-chico); background: var(--listo-suave); color: var(--listo); font-weight: 600; font-size: 14px;
+}
+.resultado-trabajo { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 20px; }
+.resultado-trabajo > div { display: grid; gap: 6px; justify-items: start; padding: 12px 14px; border-radius: var(--radio-chico); background: var(--superficie-2); border: 1px solid var(--borde); }
+.resultado-trabajo small { font-size: 12px; font-weight: 700; color: var(--texto-tenue); text-transform: uppercase; letter-spacing: 0.04em; }
+.resultado-trabajo strong { font-size: 22px; font-weight: 800; }
+
+.rejilla-dos { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; }
+.panel-cuerpo > .boton { margin-top: 4px; }
+.reporte { display: grid; gap: 4px; padding: 14px 20px; }
+.reporte-arriba { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+.reporte p { font-size: 14px; color: var(--texto-suave); white-space: pre-line; }
+.reporte .texto-tenue { font-size: 12.5px; }
+
+.perfil-cabecera { display: flex; align-items: center; gap: 16px; padding: 20px; margin-bottom: 20px; }
+.perfil-cabecera .principal { flex: 1; min-width: 0; }
+.perfil-cabecera h2 { font-size: 22px; font-weight: 800; letter-spacing: -0.01em; }
+.perfil-cabecera .insignia { font-size: 14px; padding: 6px 14px; }
+.avatar-grande { width: 64px; height: 64px; font-size: 22px; }
+.creditos-total { display: flex; align-items: baseline; gap: 8px; }
+.creditos-total .icono { width: 26px; height: 26px; color: var(--oro); align-self: center; }
+.creditos-numero { font-size: 44px; font-weight: 800; letter-spacing: -0.03em; line-height: 1; }
+.progreso { height: 10px; margin-top: 14px; border-radius: 99px; overflow: hidden; background: var(--superficie-2); border: 1px solid var(--borde); }
+.progreso span { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--acento), var(--oro)); }
+.progreso-texto { margin: 8px 0 20px; font-size: 14px; }
+.chips-categoria { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 20px; }
+.chip-categoria { display: grid; gap: 2px; padding: 12px; border-radius: var(--radio-chico); border: 1px solid var(--borde); background: var(--superficie-2); }
+.chip-categoria .icono { color: var(--listo); }
+.chip-categoria span { font-size: 12.5px; color: var(--texto-tenue); }
+.chip-categoria.bloqueada { border-style: dashed; background: none; }
+.chip-categoria.bloqueada .icono, .chip-categoria.bloqueada strong { color: var(--texto-tenue); }
+.tabla-puntos { border: 1px solid var(--borde); border-radius: var(--radio-chico); overflow: hidden; border-collapse: separate; border-spacing: 0; }
+.tabla-puntos td, .tabla-puntos th { padding: 8px 12px; font-weight: 700; }
+.datos-personales { margin: 0; padding: 4px 20px; }
+.datos-personales div { display: flex; justify-content: space-between; gap: 16px; padding: 10px 0; }
+.datos-personales div + div { border-top: 1px solid var(--borde); }
+.datos-personales dt { color: var(--texto-suave); font-weight: 600; font-size: 14px; }
+.datos-personales dd { margin: 0; text-align: right; font-weight: 700; font-size: 14px; overflow-wrap: anywhere; }
+.nota-datos { padding: 0 20px 16px; font-size: 13px; }
+.barras-calificacion { list-style: none; margin: 16px 0 0; padding: 0; display: grid; gap: 8px; }
+.barras-calificacion li { display: grid; grid-template-columns: 130px 1fr 28px; align-items: center; gap: 10px; font-size: 13.5px; }
+.barras-calificacion .barra { height: 8px; border-radius: 99px; background: var(--superficie-2); overflow: hidden; }
+.barras-calificacion .barra span { display: block; height: 100%; border-radius: 99px; background: currentColor; }
+.barras-calificacion strong { text-align: right; }
+
 /* ===================== Pantallas medianas y celulares ===================== */
 @media (max-width: 1100px) {
   .estadisticas { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .rejilla-resumen { grid-template-columns: minmax(0, 1fr); }
+  .rejilla-resumen, .rejilla-dos { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (max-width: 860px) {
@@ -424,4 +509,8 @@ td.acciones-fila { width: 1%; white-space: nowrap; text-align: right; }
   .agregar-repuesto .boton { grid-column: 1 / -1; }
   .dialogo-encabezado, .dialogo-cuerpo, .dialogo-pie { padding-left: 16px; padding-right: 16px; }
   .buscador { max-width: none; }
+  .chips-categoria, .resultado-trabajo { grid-template-columns: 1fr; }
+  .perfil-cabecera { flex-wrap: wrap; }
+  .barras-calificacion li { grid-template-columns: 110px 1fr 24px; }
+  .tabla-puntos td, .tabla-puntos th { padding: 8px 6px; font-size: 12.5px; }
 }

@@ -8,12 +8,25 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from database import inicializar_bd
-from routers import auth, clientes, mecanicos, ordenes, repuestos, vehiculos
+from routers import (
+    auth,
+    clientes,
+    mecanico,
+    mecanicos,
+    notificaciones,
+    ordenes,
+    reportes,
+    repuestos,
+    usuarios,
+    vehiculos,
+)
+from seguridad import crear_cuentas_iniciales
 
 
 @asynccontextmanager
 async def ciclo_de_vida(app: FastAPI):
     inicializar_bd()
+    crear_cuentas_iniciales()
     yield
 
 
@@ -25,6 +38,10 @@ app = FastAPI(
 )
 
 app.include_router(auth.router)
+app.include_router(usuarios.router)
+app.include_router(mecanico.router)
+app.include_router(notificaciones.router)
+app.include_router(reportes.router)
 app.include_router(clientes.router)
 app.include_router(vehiculos.router)
 app.include_router(mecanicos.router)

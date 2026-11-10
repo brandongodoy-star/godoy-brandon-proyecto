@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, status
 
 from database import obtener_conexion
 from modelos import (
+    AvanceEntrada,
     DetalleEntrada,
     DetalleRespuesta,
     EstadoOrden,
@@ -11,10 +12,10 @@ from modelos import (
     TotalOrden,
 )
 from repositorios import RepositorioDetalle, RepositorioOrden
-from seguridad import obtener_usuario_actual
+from seguridad import solo_personal
 
 router = APIRouter(
-    prefix="/ordenes", tags=["Órdenes de servicio"], dependencies=[Depends(obtener_usuario_actual)]
+    prefix="/ordenes", tags=["Órdenes de servicio"], dependencies=[Depends(solo_personal)]
 )
 
 
@@ -51,9 +52,10 @@ def eliminar_orden(orden_id: int):
 
 
 @router.post("/{orden_id}/avanzar", response_model=OrdenRespuesta)
-def avanzar_estado(orden_id: int):
+def avanzar_estado(orden_id: int, datos: AvanceEntrada | None = None):
+    calificacion = datos.calificacion if datos else None
     with obtener_conexion() as con:
-        return RepositorioOrden(con).avanzar_estado(orden_id)
+        return RepositorioOrden(con).avanzar_estado(orden_id, calificacion)
 
 
 @router.get("/{orden_id}/total", response_model=TotalOrden)

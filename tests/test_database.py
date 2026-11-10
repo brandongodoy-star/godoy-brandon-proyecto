@@ -1,14 +1,26 @@
 import sqlite3
+from pathlib import Path
 
 import pytest
 
 import database
+
+# Copia del crear_bd.sql de antes de los roles y los créditos, para probar la migración
+VERSION_1 = Path(__file__).parent / "bd_version_1.sql"
 
 
 def contar(ruta, tabla):
     con = sqlite3.connect(ruta)
     try:
         return con.execute(f"SELECT COUNT(*) FROM {tabla}").fetchone()[0]
+    finally:
+        con.close()
+
+
+def version(ruta):
+    con = sqlite3.connect(ruta)
+    try:
+        return con.execute("PRAGMA user_version").fetchone()[0]
     finally:
         con.close()
 
@@ -23,11 +35,54 @@ def ruta_bd(tmp_path, monkeypatch):
 def test_base_nueva_carga_datos_de_prueba(ruta_bd):
     database.inicializar_bd()
     assert contar(ruta_bd, "clientes") == 10
-    assert contar(ruta_bd, "vehiculos") == 10
+    assert contar(ruta_bd, "vehiculos") == 12
     assert contar(ruta_bd, "mecanicos") == 5
     assert contar(ruta_bd, "repuestos") == 10
-    assert contar(ruta_bd, "ordenes_servicio") == 10
+    assert contar(ruta_bd, "ordenes_servicio") == 11
     assert contar(ruta_bd, "detalle_orden") == 12
+    assert version(ruta_bd) == database.VERSION_BD
+
+
+def test_creditos_de_prueba_coinciden_con_su_historial(ruta_bd):
+    database.inicializar_bd()
+    con = sqlite3.connect(ruta_bd)
+    try:
+        filas = con.execute(
+            """
+            SELECT m.creditos, COALESCE(SUM(c.puntos), 0) FROM mecanicos m
+            LEFT JOIN movimientos_credito c ON c.mecanico_id = m.id GROUP BY m.id
+            """
+        ).fetchall()
+    finally:
+        con.close()
+    assert all(creditos == suma for creditos, suma in filas)
+
+
+def test_actualiza_una_base_de_la_version_anterior(ruta_bd):
+    # Base creada con el crear_bd.sql de antes de los roles, con una cuenta y datos propios
+    con = sqlite3.connect(ruta_bd)
+    con.executescript(VERSION_1.read_text(encoding="utf-8"))
+    con.execute("INSERT INTO usuarios (username, password_hash) VALUES ('viejo', 'x')")
+    con.execute("INSERT INTO clientes (nombre, telefono) VALUES ('Propio', '9999-0000')")
+    con.commit()
+    con.close()
+
+    database.inicializar_bd()
+
+    assert version(ruta_bd) == database.VERSION_BD
+    assert contar(ruta_bd, "clientes") == 11
+    con = sqlite3.connect(ruta_bd)
+    try:
+        assert con.execute("SELECT rol FROM usuarios WHERE username = 'viejo'").fetchone()[0] == "administrador"
+        assert {c for (c,) in con.execute("SELECT DISTINCT categoria FROM vehiculos")} == {"estandar"}
+        assert con.execute("SELECT SUM(creditos) FROM mecanicos").fetchone()[0] == 0
+        assert con.execute("SELECT COUNT(*) FROM reportes").fetchone()[0] == 0
+    finally:
+        con.close()
+
+    # Arrancar otra vez no vuelve a migrar ni falla
+    database.inicializar_bd()
+    assert contar(ruta_bd, "clientes") == 11
 
 
 def test_archivo_vacio_se_inicializa(ruta_bd):

@@ -3,10 +3,10 @@ from fastapi import APIRouter, Depends, status
 from database import obtener_conexion
 from modelos import MensajeRespuesta, RepuestoEntrada, RepuestoRespuesta
 from repositorios import RepositorioRepuesto
-from seguridad import obtener_usuario_actual
+from seguridad import solo_personal
 
 router = APIRouter(
-    prefix="/repuestos", tags=["Repuestos"], dependencies=[Depends(obtener_usuario_actual)]
+    prefix="/repuestos", tags=["Repuestos"], dependencies=[Depends(solo_personal)]
 )
 
 

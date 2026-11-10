@@ -48,13 +48,8 @@
     <div class="login-panel">
       <button type="button" class="boton boton-fantasma boton-tema" data-cambiar-tema></button>
       <div class="tarjeta-login">
-        <div class="pestanas" role="tablist">
-          <button type="button" class="pestana activa" data-modo="entrar" role="tab">Iniciar sesión</button>
-          <button type="button" class="pestana" data-modo="registrar" role="tab">Crear cuenta</button>
-        </div>
-
-        <h2 id="titulo-acceso">Bienvenido de nuevo</h2>
-        <p id="texto-acceso" class="texto-tenue">Ingrese sus datos para continuar.</p>
+        <h2>Iniciar sesión</h2>
+        <p class="texto-tenue">Ingrese con la cuenta que le entregó la administración del taller.</p>
 
         <form id="formulario-acceso" class="formulario-acceso">
           <div class="campo">
@@ -74,6 +69,7 @@
         </form>
 
         <p id="mensaje-acceso" class="mensaje-error" aria-live="polite"></p>
+        <p class="ayuda-acceso">¿No tiene cuenta? Pídala a la administración: aquí no se pueden crear cuentas.</p>
       </div>
     </div>
   </section>
@@ -93,7 +89,7 @@
           <span id="avatar-usuario" class="avatar"></span>
           <div>
             <strong id="nombre-usuario"></strong>
-            <span class="texto-tenue">Sesión iniciada</span>
+            <span id="rol-usuario" class="texto-tenue"></span>
           </div>
         </div>
         <div class="lateral-acciones">

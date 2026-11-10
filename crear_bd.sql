@@ -1,12 +1,15 @@
 PRAGMA foreign_keys = ON;
 
+DROP TABLE IF EXISTS notificaciones;
+DROP TABLE IF EXISTS reportes;
+DROP TABLE IF EXISTS movimientos_credito;
+DROP TABLE IF EXISTS usuarios;
 DROP TABLE IF EXISTS detalle_orden;
 DROP TABLE IF EXISTS ordenes_servicio;
 DROP TABLE IF EXISTS repuestos;
 DROP TABLE IF EXISTS mecanicos;
 DROP TABLE IF EXISTS vehiculos;
 DROP TABLE IF EXISTS clientes;
-DROP TABLE IF EXISTS usuarios;
 
 CREATE TABLE clientes (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -22,14 +25,19 @@ CREATE TABLE vehiculos (
     modelo     TEXT NOT NULL,
     anio       INTEGER NOT NULL CHECK (anio BETWEEN 1950 AND 2100),
     cliente_id INTEGER NOT NULL,
+    categoria  TEXT NOT NULL DEFAULT 'estandar' CHECK (categoria IN ('estandar', 'premium', 'lujo')),
     FOREIGN KEY (cliente_id) REFERENCES clientes(id)
 );
 
 CREATE TABLE mecanicos (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    nombre       TEXT NOT NULL,
-    especialidad TEXT,
-    activo       INTEGER NOT NULL DEFAULT 1 CHECK (activo IN (0, 1))
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre             TEXT NOT NULL,
+    especialidad       TEXT,
+    activo             INTEGER NOT NULL DEFAULT 1 CHECK (activo IN (0, 1)),
+    telefono           TEXT,
+    correo             TEXT,
+    fecha_contratacion TEXT,
+    creditos           INTEGER NOT NULL DEFAULT 0 CHECK (creditos >= 0)
 );
 
 CREATE TABLE repuestos (
@@ -48,6 +56,7 @@ CREATE TABLE ordenes_servicio (
     estado        TEXT NOT NULL DEFAULT 'recibido'
                   CHECK (estado IN ('recibido', 'en reparacion', 'listo', 'entregado')),
     mano_obra     REAL NOT NULL DEFAULT 0 CHECK (mano_obra >= 0),
+    calificacion  TEXT CHECK (calificacion IN ('excelente', 'bien', 'con problemas', 'rehacer')),
     FOREIGN KEY (vehiculo_id) REFERENCES vehiculos(id),
     FOREIGN KEY (mecanico_id) REFERENCES mecanicos(id)
 );
@@ -61,10 +70,48 @@ CREATE TABLE detalle_orden (
     FOREIGN KEY (repuesto_id) REFERENCES repuestos(id)
 );
 
+-- Las cuentas las crea la empresa. Una cuenta de mecánico se vincula con su ficha de mecánico.
 CREATE TABLE usuarios (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     username      TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL
+    password_hash TEXT NOT NULL,
+    rol           TEXT NOT NULL CHECK (rol IN ('administrador', 'recepcion', 'mecanico')),
+    nombre        TEXT,
+    mecanico_id   INTEGER REFERENCES mecanicos(id)
+);
+CREATE UNIQUE INDEX idx_usuarios_mecanico ON usuarios(mecanico_id);
+
+-- Cada vez que los créditos de un mecánico suben o bajan queda una línea aquí
+CREATE TABLE movimientos_credito (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    mecanico_id INTEGER NOT NULL REFERENCES mecanicos(id),
+    orden_id    INTEGER REFERENCES ordenes_servicio(id) ON DELETE SET NULL,
+    puntos      INTEGER NOT NULL,
+    motivo      TEXT NOT NULL,
+    fecha       TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+-- Avisos que los mecánicos envían a recepción
+CREATE TABLE notificaciones (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    tipo        TEXT NOT NULL CHECK (tipo IN ('listo', 'avance', 'reporte')),
+    mensaje     TEXT NOT NULL,
+    orden_id    INTEGER REFERENCES ordenes_servicio(id) ON DELETE SET NULL,
+    mecanico_id INTEGER REFERENCES mecanicos(id),
+    leida       INTEGER NOT NULL DEFAULT 0 CHECK (leida IN (0, 1)),
+    fecha       TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+-- Informes de los mecánicos sobre el equipo, los repuestos o la seguridad del taller
+CREATE TABLE reportes (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    mecanico_id INTEGER NOT NULL REFERENCES mecanicos(id),
+    orden_id    INTEGER REFERENCES ordenes_servicio(id) ON DELETE SET NULL,
+    tipo        TEXT NOT NULL CHECK (tipo IN ('equipo', 'repuestos', 'seguridad', 'otro')),
+    titulo      TEXT NOT NULL,
+    descripcion TEXT NOT NULL,
+    estado      TEXT NOT NULL DEFAULT 'abierto' CHECK (estado IN ('abierto', 'resuelto')),
+    fecha       TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
 
@@ -80,24 +127,26 @@ INSERT INTO clientes (nombre, telefono, direccion) VALUES
 ('Roberto Flores',  '8765-2020', 'Col. Los Pinos'),
 ('Elena Castro',    '9234-3030', 'La Libertad');
 
-INSERT INTO vehiculos (placa, marca, modelo, anio, cliente_id) VALUES
-('HAB-1234', 'Toyota',     'Hilux',   2018, 1),
-('PCA-5678', 'Honda',      'Civic',   2015, 2),
-('HBC-9012', 'Nissan',     'Frontier',2020, 3),
-('HCD-3456', 'Toyota',     'Corolla', 2012, 4),
-('HDE-7890', 'Mazda',      'CX-5',    2019, 5),
-('HEF-2345', 'Hyundai',    'Elantra', 2017, 6),
-('HFG-6789', 'Kia',        'Sportage',2021, 7),
-('HGH-1357', 'Ford',       'Ranger',  2016, 8),
-('HHI-2468', 'Chevrolet',  'Spark',   2014, 9),
-('HIJ-3579', 'Mitsubishi', 'L200',    2013, 10);
+INSERT INTO vehiculos (placa, marca, modelo, anio, cliente_id, categoria) VALUES
+('HAB-1234', 'Toyota',        'Hilux',    2018, 1,  'premium'),
+('PCA-5678', 'Honda',         'Civic',    2015, 2,  'estandar'),
+('HBC-9012', 'Nissan',        'Frontier', 2020, 3,  'premium'),
+('HCD-3456', 'Toyota',        'Corolla',  2012, 4,  'estandar'),
+('HDE-7890', 'Mazda',         'CX-5',     2019, 5,  'premium'),
+('HEF-2345', 'Hyundai',       'Elantra',  2017, 6,  'estandar'),
+('HFG-6789', 'Kia',           'Sportage', 2021, 7,  'premium'),
+('HGH-1357', 'Ford',          'Ranger',   2016, 8,  'estandar'),
+('HHI-2468', 'Chevrolet',     'Spark',    2014, 9,  'estandar'),
+('HIJ-3579', 'Mitsubishi',    'L200',     2013, 10, 'estandar'),
+('HKL-4821', 'BMW',           'X5',       2022, 3,  'lujo'),
+('HLM-9036', 'Mercedes-Benz', 'Clase C',  2021, 6,  'lujo');
 
-INSERT INTO mecanicos (nombre, especialidad, activo) VALUES
-('Marvin Cruz',   'Motor',            1),
-('Oscar Lagos',   'Frenos y suspensión', 1),
-('Denis Soto',    'Electricidad',     1),
-('Wilmer Paz',    'Transmisión',      1),
-('Hugo Banegas',  'Mecánica general', 0);
+INSERT INTO mecanicos (nombre, especialidad, activo, telefono, correo, fecha_contratacion, creditos) VALUES
+('Marvin Cruz',   'Motor',               1, '9811-2201', 'marvin.cruz@taller.hn',   '2018-03-12', 320),
+('Oscar Lagos',   'Frenos y suspensión', 1, '9822-3302', 'oscar.lagos@taller.hn',   '2021-07-01', 80),
+('Denis Soto',    'Electricidad',        1, '9833-4403', 'denis.soto@taller.hn',    '2020-01-15', 150),
+('Wilmer Paz',    'Transmisión',         1, '9844-5504', 'wilmer.paz@taller.hn',    '2022-05-09', 120),
+('Hugo Banegas',  'Mecánica general',    0, '9855-6605', 'hugo.banegas@taller.hn',  '2016-11-20', 30);
 
 INSERT INTO repuestos (nombre, precio, existencia) VALUES
 ('Filtro de aceite',      120.00, 40),
@@ -111,17 +160,18 @@ INSERT INTO repuestos (nombre, precio, existencia) VALUES
 ('Bomba de agua',        1200.00, 6),
 ('Faja serpentina',       450.00, 15);
 
-INSERT INTO ordenes_servicio (vehiculo_id, mecanico_id, fecha_ingreso, diagnostico, estado, mano_obra) VALUES
-(1,  1, '2026-10-01', 'Cambio de aceite y filtros',   'entregado',     300.00),
-(2,  2, '2026-10-03', 'Frenos desgastados',           'entregado',     500.00),
-(3,  3, '2026-10-05', 'Batería descargada',           'listo',         200.00),
-(4,  1, '2026-10-08', 'Falla en bujías',              'en reparacion', 400.00),
-(5,  4, '2026-10-10', 'Ruido en la transmisión',      'en reparacion', 1200.00),
-(6,  2, '2026-10-12', 'Amortiguadores débiles',       'recibido',      800.00),
-(7,  1, '2026-10-15', 'Cambio de banda',              'recibido',      700.00),
-(8,  3, '2026-10-18', 'Revisión eléctrica',           'listo',         350.00),
-(9,  2, '2026-10-20', 'Cambio de pastillas',          'entregado',     450.00),
-(10, 4, '2026-10-22', 'Sobrecalentamiento del motor', 'recibido',     600.00);
+INSERT INTO ordenes_servicio (vehiculo_id, mecanico_id, fecha_ingreso, diagnostico, estado, mano_obra, calificacion) VALUES
+(1,  1, '2026-10-01', 'Cambio de aceite y filtros',   'entregado',     300.00,  'excelente'),
+(2,  2, '2026-10-03', 'Frenos desgastados',           'entregado',     500.00,  'bien'),
+(3,  3, '2026-10-05', 'Batería descargada',           'listo',         200.00,  NULL),
+(4,  1, '2026-10-08', 'Falla en bujías',              'en reparacion', 400.00,  NULL),
+(5,  4, '2026-10-10', 'Ruido en la transmisión',      'en reparacion', 1200.00, NULL),
+(6,  2, '2026-10-12', 'Amortiguadores débiles',       'recibido',      800.00,  NULL),
+(7,  1, '2026-10-15', 'Cambio de banda',              'recibido',      700.00,  NULL),
+(8,  3, '2026-10-18', 'Revisión eléctrica',           'listo',         350.00,  NULL),
+(9,  2, '2026-10-20', 'Cambio de pastillas',          'entregado',     450.00,  'excelente'),
+(10, 4, '2026-10-22', 'Sobrecalentamiento del motor', 'recibido',      600.00,  NULL),
+(11, 1, '2026-10-24', 'Revisión de los 40,000 km',    'recibido',      2500.00, NULL);
 
 INSERT INTO detalle_orden (orden_id, repuesto_id, cantidad) VALUES
 (1, 1, 1), (1, 2, 4),
@@ -134,3 +184,16 @@ INSERT INTO detalle_orden (orden_id, repuesto_id, cantidad) VALUES
 (8, 4, 2),
 (9, 3, 1),
 (10, 9, 1), (10, 2, 2);
+
+-- El historial explica los créditos de cada mecánico (la suma da su total)
+INSERT INTO movimientos_credito (mecanico_id, orden_id, puntos, motivo, fecha) VALUES
+(1, NULL, 290, 'Créditos por experiencia previa', '2026-09-30 08:00:00'),
+(2, NULL, 50,  'Créditos por experiencia previa', '2026-09-30 08:00:00'),
+(3, NULL, 150, 'Créditos por experiencia previa', '2026-09-30 08:00:00'),
+(4, NULL, 120, 'Créditos por experiencia previa', '2026-09-30 08:00:00'),
+(5, NULL, 30,  'Créditos por experiencia previa', '2026-09-30 08:00:00'),
+(1, 1,    30,  'Orden #1 calificada «excelente» (auto premium)', '2026-10-02 16:30:00'),
+(2, 2,    10,  'Orden #2 calificada «bien» (auto estándar)',     '2026-10-04 11:15:00'),
+(2, 9,    20,  'Orden #9 calificada «excelente» (auto estándar)', '2026-10-21 15:45:00');
+
+PRAGMA user_version = 2;
