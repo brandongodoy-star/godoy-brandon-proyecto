@@ -39,3 +39,14 @@ def puede_trabajar(creditos: int, categoria: str) -> bool:
 def puntos_por(calificacion: str, categoria: str) -> int:
     """Créditos que gana (o pierde, si es negativo) un trabajo según su resultado y el auto."""
     return int(PUNTOS_CALIFICACION[calificacion] * MULTIPLICADOR_CATEGORIA[categoria])
+
+
+def puntos_de_miembro(calificacion_recepcion: str, calificacion_lider: str | None, categoria: str) -> int:
+    """Un miembro del equipo gana la mitad según recepción y la mitad según lo calificó su líder.
+
+    Si el líder no lo calificó, cuenta solo la calificación de recepción.
+    """
+    de_recepcion = puntos_por(calificacion_recepcion, categoria)
+    if calificacion_lider is None:
+        return de_recepcion
+    return int((de_recepcion + puntos_por(calificacion_lider, categoria)) / 2)

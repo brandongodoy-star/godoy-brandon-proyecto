@@ -25,6 +25,12 @@ def test_archivos_de_la_interfaz_sin_copias_viejas(cliente, archivo):
     assert r.headers["cache-control"] == "no-cache"
 
 
+def test_la_pagina_pide_los_archivos_con_version(cliente):
+    html = cliente.get("/").text
+    assert "/app.js?v=" in html and "/estilos.css?v=" in html
+    assert cliente.get("/app.js?v=3").status_code == 200
+
+
 def test_la_interfaz_no_tapa_la_api(cliente):
     assert cliente.get("/docs").status_code == 200
     r = cliente.get("/clientes")

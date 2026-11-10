@@ -1,6 +1,6 @@
 import pytest
 
-from creditos import nivel_de, puede_trabajar, puntos_por
+from creditos import nivel_de, puede_trabajar, puntos_de_miembro, puntos_por
 
 
 @pytest.mark.parametrize(
@@ -48,3 +48,18 @@ def test_mas_creditos_dan_acceso_a_mejores_autos():
 )
 def test_puntos_segun_resultado_y_auto(calificacion, categoria, puntos):
     assert puntos_por(calificacion, categoria) == puntos
+
+
+@pytest.mark.parametrize(
+    "recepcion, lider, categoria, puntos",
+    [
+        ("bien", "excelente", "estandar", 15),
+        ("bien", "con problemas", "estandar", 0),
+        ("excelente", "excelente", "lujo", 40),
+        ("rehacer", "bien", "premium", -11),
+        ("bien", None, "estandar", 10),
+    ],
+)
+def test_puntos_de_un_miembro_del_equipo(recepcion, lider, categoria, puntos):
+    # Mitad según recepción y mitad según su líder; sin calificación del líder cuenta solo recepción
+    assert puntos_de_miembro(recepcion, lider, categoria) == puntos

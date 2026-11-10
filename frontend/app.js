@@ -282,6 +282,14 @@ function campoHTML(campo, valor) {
     return `<div class="${clase}"><input id="${id}" name="${campo.nombre}" type="checkbox" ${valor ? "checked" : ""} />
       <label for="${id}">${esc(campo.etiqueta)}</label></div>`;
   }
+  if (campo.tipo === "checks") {
+    const elegidos = new Set(valor ?? []);
+    const opciones = campo.opciones.map((o) => `
+      <label class="check"><input type="checkbox" name="${campo.nombre}" value="${esc(o.valor)}" ${elegidos.has(o.valor) ? "checked" : ""} />
+        <span>${esc(o.texto)}</span></label>`).join("");
+    return `<fieldset class="${clase} campo-checks"><legend>${esc(campo.etiqueta)}</legend>
+      <div class="lista-checks">${opciones || `<span class="ayuda">${esc(campo.textoVacio ?? "No hay opciones")}</span>`}</div>${ayuda}</fieldset>`;
+  }
   if (campo.tipo === "select") {
     const opciones = campo.opciones
       .map((o) => `<option value="${esc(o.valor)}" ${o.valor === valor ? "selected" : ""}>${esc(o.texto)}</option>`)
@@ -301,6 +309,11 @@ function campoHTML(campo, valor) {
 function leerFormulario(formulario, campos) {
   const datos = {};
   for (const campo of campos) {
+    if (campo.tipo === "checks") {
+      const marcados = formulario.querySelectorAll(`input[name="${campo.nombre}"]:checked`);
+      datos[campo.nombre] = [...marcados].map((casilla) => Number(casilla.value));
+      continue;
+    }
     const control = formulario.elements[campo.nombre];
     if (campo.tipo === "checkbox") datos[campo.nombre] = control.checked;
     else if (control.value.trim() === "") datos[campo.nombre] = null;
@@ -577,7 +590,7 @@ function tarjetaOrden(orden) {
       <div class="vehiculo">${esc(textoVehiculo(vehiculo))}</div>
       <div class="diagnostico">${esc(orden.diagnostico || "Sin diagnóstico")}</div>
       <div class="abajo">
-        <span class="mecanico-mini"><span class="avatar">${esc(iniciales(mecanico?.nombre))}</span><span>${esc(mecanico?.nombre ?? "—")}</span></span>
+        <span class="mecanico-mini"><span class="avatar">${esc(iniciales(mecanico?.nombre))}</span><span>${esc(mecanico?.nombre ?? "—")}</span>${orden.equipo.length ? `<span class="mas-equipo" title="Equipo de ${orden.equipo.length + 1}">+${orden.equipo.length}</span>` : ""}</span>
         <span>${orden.calificacion ? esc(nombreCalificacion(orden.calificacion)) : fecha(orden.fecha_ingreso)}</span>
       </div>
     </button>`;
@@ -625,7 +638,10 @@ function conectarTarjetasOrden() {
 }
 
 function camposOrden(orden) {
-  const mecanicos = estado.datos.mecanicos.filter((m) => m.activo || m.id === orden?.mecanico_id);
+  // De más fama a menos: el primero es el líder sugerido
+  const porFama = [...estado.datos.mecanicos].sort((a, b) => b.creditos - a.creditos);
+  const mecanicos = porFama.filter((m) => m.activo || m.id === orden?.mecanico_id);
+  const disponibles = porFama.filter((m) => m.activo || orden?.equipo.includes(m.id));
   return [
     {
       nombre: "vehiculo_id", etiqueta: "Vehículo", tipo: "select", requerido: true, completo: true,
@@ -635,9 +651,18 @@ function camposOrden(orden) {
       })),
     },
     {
-      nombre: "mecanico_id", etiqueta: "Mecánico", tipo: "select", requerido: true,
-      opciones: mecanicos.map((m) => ({ valor: m.id, texto: `${m.nombre} · ${m.nivel}${m.activo ? "" : " (inactivo)"}` })),
-      ayuda: "Aprendiz: Estándar · Técnico: hasta Premium · Maestro: todos",
+      nombre: "mecanico_id", etiqueta: "Líder del trabajo", tipo: "select", requerido: true, completo: true,
+      opciones: mecanicos.map((m, i) => ({
+        valor: m.id,
+        texto: `${m.nombre} · ${m.nivel} (${m.creditos} cr.)${i === 0 && m.activo ? " · más fama" : ""}${m.activo ? "" : " (inactivo)"}`,
+      })),
+      porDefecto: mecanicos.find((m) => m.activo)?.id,
+      ayuda: "Normalmente el de más fama. Debe tener nivel para el auto: Técnico para Premium, Maestro para Lujo",
+    },
+    {
+      nombre: "equipo", etiqueta: "Equipo (además del líder)", tipo: "checks", completo: true,
+      opciones: disponibles.map((m) => ({ valor: m.id, texto: `${m.nombre} · ${m.nivel}` })),
+      ayuda: "Ven el trabajo; el líder les asigna tareas, los califica y puede reportarlos",
     },
     { nombre: "fecha_ingreso", etiqueta: "Fecha de ingreso", tipo: "date", requerido: true, max: hoy(), porDefecto: hoy() },
     { nombre: "mano_obra", etiqueta: "Mano de obra (L)", tipo: "number", min: 0, paso: 0.01, porDefecto: 0 },
@@ -658,10 +683,24 @@ function formularioOrden(orden) {
     textoBoton: orden ? "Guardar cambios" : "Crear orden",
     enviar: async (datos) => {
       datos.mano_obra ??= 0;
+      // Si el líder quedó marcado también en el equipo, se quita de ahí
+      datos.equipo = datos.equipo.filter((id) => id !== datos.mecanico_id);
       const guardada = await api(orden ? `/ordenes/${orden.id}` : "/ordenes", { metodo: orden ? "PUT" : "POST", datos });
       aviso(orden ? "Orden actualizada" : `Orden #${guardada.id} creada`);
     },
   });
+
+  // El líder elegido no se puede marcar también como miembro del equipo
+  const lider = $("#campo-mecanico_id", dialogo);
+  const sincronizarEquipo = () =>
+    dialogo.querySelectorAll('input[name="equipo"]').forEach((casilla) => {
+      const esLider = casilla.value === lider.value;
+      casilla.disabled = esLider;
+      if (esLider) casilla.checked = false;
+      casilla.closest(".check").classList.toggle("deshabilitado", esLider);
+    });
+  lider.addEventListener("change", sincronizarEquipo);
+  sincronizarEquipo();
 }
 
 /** Pide la calificación del trabajo antes de entregar. Resuelve con la clave elegida o "". */
@@ -671,7 +710,9 @@ function pedirCalificacion(orden, vehiculo, mecanico) {
     <form method="dialog" id="formulario-calificacion">
       <div class="dialogo-encabezado"><div>
         <h2>¿Cómo quedó el trabajo?</h2>
-        <p>Al entregar la orden #${orden.id} se califica el trabajo de ${esc(mecanico?.nombre ?? "el mecánico")}. Eso suma o resta sus créditos (auto ${CATEGORIAS[categoria].nombre.toLowerCase()}).</p>
+        <p>Al entregar la orden #${orden.id} se califica el trabajo de ${esc(mecanico?.nombre ?? "el mecánico")}, el líder. Eso suma o resta sus créditos (auto ${CATEGORIAS[categoria].nombre.toLowerCase()}).${orden.equipo.length
+          ? ` Cada uno de los ${orden.equipo.length} del equipo recibe la mitad de esto y la otra mitad según lo calificó su líder.`
+          : ""}</p>
       </div></div>
       <div class="dialogo-cuerpo"><div class="opciones-calificacion">
         ${CALIFICACIONES.map((c, i) => {
@@ -724,8 +765,14 @@ async function abrirOrden(id) {
       <div class="datos-orden">
         <div class="dato"><small>Vehículo</small><strong>${esc(textoVehiculo(vehiculo))}</strong>${vehiculo ? insigniaCategoria(vehiculo.categoria) : ""}</div>
         <div class="dato"><small>Cliente</small><strong>${esc(cliente?.nombre ?? "—")}</strong><span class="mono">${esc(cliente?.telefono ?? "")}</span></div>
-        <div class="dato"><small>Mecánico</small><strong>${esc(mecanico?.nombre ?? "—")}</strong>${mecanico ? insigniaNivel(mecanico.creditos) : ""}</div>
+        <div class="dato"><small>Líder del trabajo</small><strong>${esc(mecanico?.nombre ?? "—")}</strong>${mecanico ? insigniaNivel(mecanico.creditos) : ""}</div>
         <div class="dato"><small>Mano de obra</small><strong>${dinero(orden.mano_obra)}</strong></div>
+        <div class="dato completo"><small>Equipo</small>${orden.equipo.length
+          ? `<div class="chips-equipo">${orden.equipo.map((mid) => {
+              const m = porId(estado.datos.mecanicos, mid);
+              return `<span class="chip-equipo"><span class="avatar">${esc(iniciales(m?.nombre))}</span>${esc(m?.nombre ?? "—")}</span>`;
+            }).join("")}</div>`
+          : `<span>Solo el líder</span>`}</div>
         <div class="dato completo"><small>Diagnóstico</small><strong>${esc(orden.diagnostico || "Sin diagnóstico")}</strong></div>
         ${orden.calificacion ? `<div class="dato completo"><small>Calificación del trabajo</small>${insigniaCalificacion(orden.calificacion)}</div>` : ""}
       </div>
@@ -893,7 +940,9 @@ function tarjetaTrabajo(t) {
       <div class="arriba"><span class="placa">${esc(t.placa)}</span>${categoria}<span class="numero-orden">#${t.id}</span></div>
       <div class="vehiculo">${esc(t.marca)} ${esc(t.modelo)} ${t.anio}</div>
       <div class="diagnostico">${esc(t.diagnostico || "Sin diagnóstico")}</div>
-      <div class="abajo"><span>${esc(t.cliente)}</span>
+      <div class="abajo">${t.soy_lider
+        ? `<span class="insignia insignia-lujo">${icono("estrella")}Líder</span>`
+        : `<span>Equipo de ${esc(t.lider)}</span>`}
         ${t.calificacion ? insigniaCalificacion(t.calificacion) : `<span>${fecha(t.fecha_ingreso)}</span>`}</div>
     </button>`;
 }
@@ -921,6 +970,69 @@ function pintarTrabajos() {
   $("#vista").querySelectorAll("[data-trabajo]").forEach((elemento) =>
     elemento.addEventListener("click", () => abrirTrabajo(Number(elemento.dataset.trabajo)))
   );
+}
+
+/** Sección «Equipo» del trabajo. El líder, mientras dura el trabajo, asigna tareas, califica y reporta. */
+function seccionEquipo(t) {
+  const dirige = t.puedo_dirigir;
+  const miembros = t.equipo.filter((m) => !m.es_lider);
+  let nota = "";
+  if (dirige) {
+    nota = `<p class="nota-lider">${icono("estrella")}<span>Usted es el <strong>líder de este trabajo</strong>: asigne una tarea a cada miembro, califique su trabajo y repórtelos si hace falta. Estos permisos terminan cuando marque el trabajo como listo.</span></p>`;
+  } else if (t.soy_lider) {
+    nota = `<p class="nota-neutra">${icono("check")}<span>Usted lideró este trabajo. Sus permisos de líder terminaron al finalizarlo.</span></p>`;
+  } else if (ESTADOS_EDITABLES.includes(t.estado)) {
+    nota = `<p class="nota-neutra">${icono("perfil")}<span>El líder de este trabajo es <strong>${esc(t.lider)}</strong>. Solo él puede empezarlo o marcarlo como listo.</span></p>`;
+  }
+
+  const filas = t.equipo.map((m) => {
+    const estadoMiembro = m.es_lider
+      ? `<span class="insignia insignia-lujo">${icono("estrella")}Líder</span>`
+      : m.calificacion ? insigniaCalificacion(m.calificacion) : `<span class="insignia insignia-neutra">Sin calificar</span>`;
+    const cabecera = `<div class="miembro-cabecera"><span class="avatar">${esc(iniciales(m.nombre))}</span>
+      <div class="principal"><strong>${esc(m.nombre)}</strong><span>${esc(m.especialidad || "Sin especialidad")} · ${esc(m.nivel)}</span></div>
+      ${estadoMiembro}</div>`;
+    if (m.es_lider) return `<li class="miembro">${cabecera}</li>`;
+    if (!dirige) return `<li class="miembro">${cabecera}<p class="tarea">${m.tarea ? `Tarea: ${esc(m.tarea)}` : "Sin tarea asignada"}</p></li>`;
+    return `<li class="miembro">${cabecera}
+      <form class="form-miembro" data-miembro="${m.mecanico_id}">
+        <input name="tarea" maxlength="200" placeholder="Tarea que le asigna" value="${esc(m.tarea)}" aria-label="Tarea de ${esc(m.nombre)}" />
+        <select name="calificacion" aria-label="Calificación de ${esc(m.nombre)}">
+          <option value="">Sin calificar</option>
+          ${CALIFICACIONES.map((c) => `<option value="${esc(c.clave)}" ${c.clave === m.calificacion ? "selected" : ""}>${esc(c.nombre)}</option>`).join("")}
+        </select>
+        <button type="submit" class="boton boton-secundario">Guardar</button>
+      </form></li>`;
+  }).join("");
+
+  let reportes = "";
+  if (t.soy_lider) {
+    reportes = `
+      <h3 class="seccion-titulo">Reportes del equipo <span class="conteo">${t.reportes_equipo.length}</span></h3>
+      ${t.reportes_equipo.length
+        ? `<ul class="lista-reportes-equipo">${t.reportes_equipo.map((r) => `
+            <li><strong>${esc(r.sobre_mecanico)} · ${esc(r.titulo)}</strong><p>${esc(r.descripcion)}</p>
+              <span class="texto-tenue">${fechaHora(r.fecha)}</span></li>`).join("")}</ul>`
+        : `<p class="vacio-chico" style="padding-left:0">No ha reportado a ningún miembro.</p>`}
+      ${dirige && miembros.length ? `
+      <form id="formulario-reporte-equipo" class="reporte-equipo" novalidate>
+        <div class="rejilla-campos">
+          <div class="campo"><label for="reporte-miembro">Miembro</label>
+            <select id="reporte-miembro" required><option value="">Seleccione…</option>
+              ${miembros.map((m) => `<option value="${m.mecanico_id}">${esc(m.nombre)}</option>`).join("")}</select></div>
+          <div class="campo"><label for="reporte-titulo">Título</label><input id="reporte-titulo" required minlength="3" maxlength="100" /></div>
+          <div class="campo completo"><label for="reporte-descripcion">¿Qué pasó?</label>
+            <textarea id="reporte-descripcion" required minlength="5" maxlength="1000"></textarea></div>
+        </div>
+        <p class="mensaje-error" id="error-reporte-equipo" aria-live="polite"></p>
+        <button type="submit" class="boton boton-secundario">${icono("reporte")} Reportar a recepción</button>
+      </form>` : ""}`;
+  }
+
+  return `${nota}
+    <h3 class="seccion-titulo">Equipo <span class="conteo">${t.equipo.length}</span></h3>
+    <ul class="lista-equipo">${filas}</ul>
+    ${reportes}`;
 }
 
 async function abrirTrabajo(id) {
@@ -959,6 +1071,8 @@ async function abrirTrabajo(id) {
         ? `<ul class="lista-repuestos">${trabajo.repuestos.map((r) => `<li><span>${esc(r.repuesto)}</span><strong>× ${r.cantidad}</strong></li>`).join("")}</ul>`
         : `<p class="vacio-chico" style="padding-left:0">Recepción todavía no asignó repuestos.</p>`}
 
+      ${seccionEquipo(trabajo)}
+
       ${activo ? `
       <div class="campo mensaje-recepcion">
         <label for="mensaje-recepcion">Mensaje para recepción</label>
@@ -968,8 +1082,8 @@ async function abrirTrabajo(id) {
     </div>
     <div class="dialogo-pie">
       ${activo ? `<button type="button" class="boton boton-secundario separar" id="enviar-aviso">${icono("enviar")} Enviar aviso</button>` : `<button type="button" class="boton boton-secundario" data-cerrar>Cerrar</button>`}
-      ${trabajo.estado === "recibido" ? `<button type="button" class="boton boton-primario" id="empezar-trabajo">${icono("mecanicos")} Empezar reparación</button>` : ""}
-      ${trabajo.estado === "en reparacion" ? `<button type="button" class="boton boton-primario" id="marcar-listo">${icono("check")} Marcar como listo</button>` : ""}
+      ${trabajo.soy_lider && trabajo.estado === "recibido" ? `<button type="button" class="boton boton-primario" id="empezar-trabajo">${icono("mecanicos")} Empezar reparación</button>` : ""}
+      ${trabajo.soy_lider && trabajo.estado === "en reparacion" ? `<button type="button" class="boton boton-primario" id="marcar-listo">${icono("check")} Marcar como listo</button>` : ""}
     </div>`, (raiz) => {
     const mensaje = () => $("#mensaje-recepcion", raiz)?.value.trim() ?? "";
     $("#empezar-trabajo", raiz)?.addEventListener("click", async () => {
@@ -997,6 +1111,38 @@ async function abrirTrabajo(id) {
       if (await intentar(() => api(`/mecanico/trabajos/${id}/aviso`, { metodo: "POST", datos: { mensaje: texto } }))) {
         aviso("Aviso enviado a recepción");
         $("#mensaje-recepcion", raiz).value = "";
+      }
+    });
+
+    // Solo aparecen para el líder mientras dura el trabajo
+    raiz.querySelectorAll(".form-miembro").forEach((formulario) =>
+      formulario.addEventListener("submit", async (evento) => {
+        evento.preventDefault();
+        const datos = {
+          tarea: formulario.elements.tarea.value.trim() || null,
+          calificacion: formulario.elements.calificacion.value || null,
+        };
+        const ruta = `/mecanico/trabajos/${id}/equipo/${formulario.dataset.miembro}`;
+        if (await intentar(() => api(ruta, { metodo: "PUT", datos }))) {
+          aviso("Equipo actualizado");
+          abrirTrabajo(id);
+        }
+      })
+    );
+    $("#formulario-reporte-equipo", raiz)?.addEventListener("submit", async (evento) => {
+      evento.preventDefault();
+      const formulario = evento.currentTarget;
+      const error = $("#error-reporte-equipo", raiz);
+      error.textContent = "";
+      if (!formularioValido(formulario, error)) return;
+      const datos = {
+        sobre_mecanico_id: Number($("#reporte-miembro", raiz).value),
+        titulo: $("#reporte-titulo", raiz).value.trim(),
+        descripcion: $("#reporte-descripcion", raiz).value.trim(),
+      };
+      if (await intentar(() => api(`/mecanico/trabajos/${id}/reportes-equipo`, { metodo: "POST", datos }))) {
+        aviso("Reporte enviado a recepción");
+        abrirTrabajo(id);
       }
     });
   });

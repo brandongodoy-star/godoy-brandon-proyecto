@@ -2,7 +2,7 @@ import sqlite3
 
 from fastapi import HTTPException
 
-from creditos import NOMBRE_CATEGORIA, nivel_de, puede_trabajar, puntos_por
+from creditos import NOMBRE_CATEGORIA, nivel_de, puede_trabajar, puntos_de_miembro, puntos_por
 
 ESTADOS_ORDEN = ("recibido", "en reparacion", "listo", "entregado")
 ESTADOS_EDITABLES = ("recibido", "en reparacion")
@@ -101,14 +101,66 @@ class RepositorioOrden(RepositorioBase):
     columnas = ("vehiculo_id", "mecanico_id", "fecha_ingreso", "diagnostico", "mano_obra")
     no_encontrado = "Orden no encontrada"
 
+    # mecanico_id es el líder del trabajo; los demás miembros del equipo están en equipo_orden
+
+    def obtener_por_id(self, orden_id: int) -> dict:
+        orden = super().obtener_por_id(orden_id)
+        orden["equipo"] = [
+            fila["mecanico_id"]
+            for fila in self.con.execute(
+                "SELECT mecanico_id FROM equipo_orden WHERE orden_id = ? ORDER BY id", (orden_id,)
+            )
+        ]
+        return orden
+
+    def obtener_todos(self, **filtros) -> list[dict]:
+        ordenes = super().obtener_todos(**filtros)
+        equipos: dict[int, list[int]] = {}
+        for fila in self.con.execute("SELECT orden_id, mecanico_id FROM equipo_orden ORDER BY id"):
+            equipos.setdefault(fila["orden_id"], []).append(fila["mecanico_id"])
+        for orden in ordenes:
+            orden["equipo"] = equipos.get(orden["id"], [])
+        return ordenes
+
     def crear(self, datos: dict) -> dict:
         self._validar_referencias(datos)
-        return super().crear(datos)
+        miembros = self._validar_equipo(datos)
+        orden = super().crear(datos)
+        self._guardar_equipo(orden["id"], miembros)
+        return self.obtener_por_id(orden["id"])
 
     def actualizar(self, orden_id: int, datos: dict) -> dict:
         actual = self.verificar_editable(orden_id)
         self._validar_referencias(datos, actual)
-        return super().actualizar(orden_id, datos)
+        miembros = self._validar_equipo(datos)
+        super().actualizar(orden_id, datos)
+        self._guardar_equipo(orden_id, miembros)
+        return self.obtener_por_id(orden_id)
+
+    def _validar_equipo(self, datos: dict) -> list[int]:
+        """Los miembros deben existir, estar activos y no repetir al líder."""
+        miembros = list(dict.fromkeys(datos.get("equipo") or []))
+        if datos["mecanico_id"] in miembros:
+            raise HTTPException(status_code=400, detail="El líder ya dirige el trabajo: no lo agregue al equipo")
+        for mecanico_id in miembros:
+            mecanico = RepositorioMecanico(self.con).obtener_por_id(mecanico_id)
+            if not mecanico["activo"]:
+                raise HTTPException(status_code=400, detail=f"{mecanico['nombre']} no está activo")
+        return miembros
+
+    def _guardar_equipo(self, orden_id: int, miembros: list[int]) -> None:
+        """Deja exactamente esos miembros. Los que siguen conservan su tarea y su calificación."""
+        marcadores = ", ".join("?" for _ in miembros)
+        self.con.execute(
+            "DELETE FROM equipo_orden WHERE orden_id = ?"
+            + (f" AND mecanico_id NOT IN ({marcadores})" if miembros else ""),
+            (orden_id, *miembros),
+        )
+        for mecanico_id in miembros:
+            self.con.execute(
+                "INSERT OR IGNORE INTO equipo_orden (orden_id, mecanico_id) VALUES (?, ?)",
+                (orden_id, mecanico_id),
+            )
 
     def eliminar(self, orden_id: int) -> None:
         """Borra la orden y devuelve sus repuestos al inventario."""
@@ -163,23 +215,39 @@ class RepositorioOrden(RepositorioBase):
         return self.obtener_por_id(orden_id)
 
     def _calificar(self, orden: dict, calificacion: str) -> None:
+        """El líder recibe los créditos de la calificación de recepción; cada miembro, la mitad
+        según recepción y la mitad según la calificación que le dio su líder."""
         categoria = RepositorioVehiculo(self.con).obtener_por_id(orden["vehiculo_id"])["categoria"]
-        mecanico = RepositorioMecanico(self.con).obtener_por_id(orden["mecanico_id"])
-        # Los créditos nunca bajan de 0; en el historial queda lo que de verdad cambió
-        nuevos = max(0, mecanico["creditos"] + puntos_por(calificacion, categoria))
+        auto = f"auto {NOMBRE_CATEGORIA[categoria].lower()}"
         self.con.execute(
             "UPDATE ordenes_servicio SET calificacion = ? WHERE id = ?", (calificacion, orden["id"])
         )
-        self.con.execute("UPDATE mecanicos SET creditos = ? WHERE id = ?", (nuevos, mecanico["id"]))
+        self._sumar_creditos(
+            orden["mecanico_id"],
+            orden["id"],
+            puntos_por(calificacion, categoria),
+            f"Orden #{orden['id']} calificada «{calificacion}» ({auto})",
+        )
+        miembros = self.con.execute(
+            "SELECT mecanico_id, calificacion FROM equipo_orden WHERE orden_id = ?", (orden["id"],)
+        ).fetchall()
+        for miembro in miembros:
+            del_lider = miembro["calificacion"] or "sin calificar"
+            self._sumar_creditos(
+                miembro["mecanico_id"],
+                orden["id"],
+                puntos_de_miembro(calificacion, miembro["calificacion"], categoria),
+                f"Orden #{orden['id']} en equipo: recepción «{calificacion}», líder «{del_lider}» ({auto})",
+            )
+
+    def _sumar_creditos(self, mecanico_id: int, orden_id: int, puntos: int, motivo: str) -> None:
+        mecanico = RepositorioMecanico(self.con).obtener_por_id(mecanico_id)
+        # Los créditos nunca bajan de 0; en el historial queda lo que de verdad cambió
+        nuevos = max(0, mecanico["creditos"] + puntos)
+        self.con.execute("UPDATE mecanicos SET creditos = ? WHERE id = ?", (nuevos, mecanico_id))
         self.con.execute(
             "INSERT INTO movimientos_credito (mecanico_id, orden_id, puntos, motivo) VALUES (?, ?, ?, ?)",
-            (
-                mecanico["id"],
-                orden["id"],
-                nuevos - mecanico["creditos"],
-                f"Orden #{orden['id']} calificada «{calificacion}» "
-                f"(auto {NOMBRE_CATEGORIA[categoria].lower()})",
-            ),
+            (mecanico_id, orden_id, nuevos - mecanico["creditos"], motivo),
         )
 
     def _validar_referencias(self, datos: dict, actual: dict | None = None) -> None:
@@ -304,15 +372,22 @@ class RepositorioReporte(RepositorioBase):
     """Informes de los mecánicos sobre el equipo, los repuestos o la seguridad del taller."""
 
     tabla = "reportes"
-    columnas = ("mecanico_id", "orden_id", "tipo", "titulo", "descripcion")
+    columnas = ("mecanico_id", "orden_id", "tipo", "titulo", "descripcion", "sobre_mecanico_id")
     no_encontrado = "Reporte no encontrado"
 
     CONSULTA_COMPLETA = (
-        "SELECT r.*, m.nombre AS mecanico FROM reportes r JOIN mecanicos m ON m.id = r.mecanico_id"
+        "SELECT r.*, m.nombre AS mecanico, s.nombre AS sobre_mecanico FROM reportes r "
+        "JOIN mecanicos m ON m.id = r.mecanico_id LEFT JOIN mecanicos s ON s.id = r.sobre_mecanico_id"
     )
 
-    def listar(self, mecanico_id: int | None = None, estado: str | None = None) -> list[dict]:
-        filtros = {"r.mecanico_id": mecanico_id, "r.estado": estado}
+    def listar(
+        self,
+        mecanico_id: int | None = None,
+        estado: str | None = None,
+        orden_id: int | None = None,
+        tipo: str | None = None,
+    ) -> list[dict]:
+        filtros = {"r.mecanico_id": mecanico_id, "r.estado": estado, "r.orden_id": orden_id, "r.tipo": tipo}
         filtros = {campo: valor for campo, valor in filtros.items() if valor is not None}
         where = " AND ".join(f"{campo} = ?" for campo in filtros)
         filas = self.con.execute(
@@ -350,15 +425,21 @@ class RepositorioReporte(RepositorioBase):
 
 
 class RepositorioTrabajos:
-    """Las órdenes de un mecánico vistas desde su área: solo ve y cambia las suyas."""
+    """Las órdenes de un mecánico vistas desde su área: las que dirige como líder y las que
+    acompaña como miembro del equipo. Solo ve y cambia esas."""
 
-    CONSULTA = """
+    # :m es el mecánico que consulta
+    PARTICIPA = """(o.mecanico_id = :m OR EXISTS (
+        SELECT 1 FROM equipo_orden e WHERE e.orden_id = o.id AND e.mecanico_id = :m))"""
+    CONSULTA = f"""
         SELECT o.id, o.estado, o.fecha_ingreso, o.diagnostico, o.calificacion,
-               v.placa, v.marca, v.modelo, v.anio, v.categoria, c.nombre AS cliente
+               v.placa, v.marca, v.modelo, v.anio, v.categoria, c.nombre AS cliente,
+               l.nombre AS lider, o.mecanico_id = :m AS soy_lider
         FROM ordenes_servicio o
         JOIN vehiculos v ON v.id = o.vehiculo_id
         JOIN clientes c ON c.id = v.cliente_id
-        WHERE o.mecanico_id = ?
+        JOIN mecanicos l ON l.id = o.mecanico_id
+        WHERE {PARTICIPA}
     """
     NOMBRE_ESTADO = {"recibido": "por empezar", "en reparacion": "en reparación"}
 
@@ -368,16 +449,18 @@ class RepositorioTrabajos:
 
     def listar(self) -> list[dict]:
         filas = self.con.execute(
-            self.CONSULTA + " ORDER BY o.fecha_ingreso DESC, o.id DESC", (self.mecanico_id,)
+            self.CONSULTA + " ORDER BY o.fecha_ingreso DESC, o.id DESC", {"m": self.mecanico_id}
         ).fetchall()
-        return [dict(fila) for fila in filas]
+        return [self._con_booleanos(fila) for fila in filas]
 
     def obtener(self, orden_id: int) -> dict:
-        # Una orden de otro mecánico responde igual que una que no existe
-        fila = self.con.execute(self.CONSULTA + " AND o.id = ?", (self.mecanico_id, orden_id)).fetchone()
+        # Una orden en la que no participa responde igual que una que no existe
+        fila = self.con.execute(
+            self.CONSULTA + " AND o.id = :orden", {"m": self.mecanico_id, "orden": orden_id}
+        ).fetchone()
         if fila is None:
             raise HTTPException(status_code=404, detail="Orden no encontrada")
-        return dict(fila)
+        return self._con_booleanos(fila)
 
     def detalle(self, orden_id: int) -> dict:
         trabajo = self.obtener(orden_id)
@@ -393,21 +476,43 @@ class RepositorioTrabajos:
             "SELECT SUM(puntos) FROM movimientos_credito WHERE orden_id = ? AND mecanico_id = ?",
             (orden_id, self.mecanico_id),
         ).fetchone()[0]
-        return {**trabajo, "repuestos": [dict(fila) for fila in repuestos], "creditos": creditos}
+        # Los reportes del líder sobre su equipo solo los ve el líder (y recepción)
+        reportes = (
+            RepositorioReporte(self.con).listar(orden_id=orden_id, tipo="desempeno")
+            if trabajo["soy_lider"]
+            else []
+        )
+        return {
+            **trabajo,
+            "repuestos": [dict(fila) for fila in repuestos],
+            "creditos": creditos,
+            "equipo": self._equipo(orden_id),
+            "puedo_dirigir": self._puede_dirigir(trabajo),
+            "reportes_equipo": reportes,
+        }
 
     def iniciar(self, orden_id: int) -> dict:
-        if self.obtener(orden_id)["estado"] != "recibido":
+        trabajo = self._exigir_lider(orden_id)
+        if trabajo["estado"] != "recibido":
             raise HTTPException(status_code=400, detail="Este trabajo ya fue empezado")
         self._cambiar_estado(orden_id, "en reparacion")
         return self.detalle(orden_id)
 
     def marcar_listo(self, orden_id: int, nota: str | None) -> dict:
-        """Termina la reparación y avisa a recepción que puede entregar el vehículo."""
-        trabajo = self.obtener(orden_id)
+        """Termina la reparación y avisa a recepción. Con esto el líder pierde sus permisos."""
+        trabajo = self._exigir_lider(orden_id)
         if trabajo["estado"] == "recibido":
             raise HTTPException(status_code=400, detail="Primero empiece la reparación")
         if trabajo["estado"] != "en reparacion":
             raise HTTPException(status_code=400, detail="Este trabajo ya fue marcado como listo")
+        sin_calificar = self.con.execute(
+            "SELECT COUNT(*) FROM equipo_orden WHERE orden_id = ? AND calificacion IS NULL", (orden_id,)
+        ).fetchone()[0]
+        if sin_calificar:
+            raise HTTPException(
+                status_code=400,
+                detail="Califique el trabajo de cada miembro del equipo antes de marcarlo como listo",
+            )
         self._cambiar_estado(orden_id, "listo")
         mensaje = (
             f"La orden #{orden_id} ({trabajo['placa']}, {trabajo['marca']} {trabajo['modelo']}) "
@@ -424,21 +529,51 @@ class RepositorioTrabajos:
         estado = self.NOMBRE_ESTADO[trabajo["estado"]]
         self._avisar("avance", f"Orden #{orden_id} ({trabajo['placa']}) sigue {estado}: {mensaje}", orden_id)
 
+    # ---------- Lo que solo puede hacer el líder, y solo mientras dura el trabajo ----------
+    def dirigir_miembro(self, orden_id: int, miembro_id: int, cambios: dict) -> dict:
+        """Asigna la tarea de un miembro y/o califica su trabajo."""
+        self._exigir_direccion(orden_id)
+        self._exigir_miembro(orden_id, miembro_id)
+        campos = [campo for campo in ("tarea", "calificacion") if campo in cambios]
+        if campos:
+            self.con.execute(
+                f"UPDATE equipo_orden SET {', '.join(f'{c} = ?' for c in campos)} "
+                "WHERE orden_id = ? AND mecanico_id = ?",
+                (*(cambios[c] for c in campos), orden_id, miembro_id),
+            )
+        return self.detalle(orden_id)
+
+    def reportar_miembro(self, orden_id: int, datos: dict) -> dict:
+        """Reporte del líder sobre un miembro de su equipo; también avisa a recepción."""
+        self._exigir_direccion(orden_id)
+        miembro = self._exigir_miembro(orden_id, datos["sobre_mecanico_id"])
+        reportes = RepositorioReporte(self.con)
+        reporte = reportes.crear(
+            {**datos, "mecanico_id": self.mecanico_id, "orden_id": orden_id, "tipo": "desempeno"}
+        )
+        lider = RepositorioMecanico(self.con).obtener_por_id(self.mecanico_id)
+        self._avisar(
+            "reporte",
+            f"Reporte del líder {lider['nombre']} sobre {miembro['nombre']} (orden #{orden_id}): {datos['titulo']}",
+            orden_id,
+        )
+        return reportes.obtener_completo(reporte["id"])
+
     def perfil(self, usuario: str) -> dict:
         mecanico = RepositorioMecanico(self.con).obtener_por_id(self.mecanico_id)
         por_estado = dict(
             self.con.execute(
-                "SELECT estado, COUNT(*) FROM ordenes_servicio WHERE mecanico_id = ? GROUP BY estado",
-                (self.mecanico_id,),
+                f"SELECT estado, COUNT(*) FROM ordenes_servicio o WHERE {self.PARTICIPA} GROUP BY estado",
+                {"m": self.mecanico_id},
             ).fetchall()
         )
         calificaciones = dict(
             self.con.execute(
-                """
-                SELECT calificacion, COUNT(*) FROM ordenes_servicio
-                WHERE mecanico_id = ? AND calificacion IS NOT NULL GROUP BY calificacion
+                f"""
+                SELECT calificacion, COUNT(*) FROM ordenes_servicio o
+                WHERE {self.PARTICIPA} AND calificacion IS NOT NULL GROUP BY calificacion
                 """,
-                (self.mecanico_id,),
+                {"m": self.mecanico_id},
             ).fetchall()
         )
         historial = self.con.execute(
@@ -461,6 +596,58 @@ class RepositorioTrabajos:
             },
             "historial": [dict(fila) for fila in historial],
         }
+
+    def _equipo(self, orden_id: int) -> list[dict]:
+        filas = self.con.execute(
+            """
+            SELECT m.id AS mecanico_id, m.nombre, m.especialidad, m.creditos,
+                   1 AS es_lider, NULL AS tarea, NULL AS calificacion
+            FROM ordenes_servicio o JOIN mecanicos m ON m.id = o.mecanico_id WHERE o.id = :orden
+            UNION ALL
+            SELECT m.id, m.nombre, m.especialidad, m.creditos, 0, e.tarea, e.calificacion
+            FROM equipo_orden e JOIN mecanicos m ON m.id = e.mecanico_id WHERE e.orden_id = :orden
+            ORDER BY es_lider DESC, nombre
+            """,
+            {"orden": orden_id},
+        ).fetchall()
+        return [
+            {**dict(fila), "es_lider": bool(fila["es_lider"]), "nivel": nivel_de(fila["creditos"])["nombre"]}
+            for fila in filas
+        ]
+
+    @staticmethod
+    def _con_booleanos(fila: sqlite3.Row) -> dict:
+        return {**dict(fila), "soy_lider": bool(fila["soy_lider"])}
+
+    @staticmethod
+    def _puede_dirigir(trabajo: dict) -> bool:
+        return trabajo["soy_lider"] and trabajo["estado"] in ESTADOS_EDITABLES
+
+    def _exigir_lider(self, orden_id: int) -> dict:
+        trabajo = self.obtener(orden_id)
+        if not trabajo["soy_lider"]:
+            raise HTTPException(status_code=403, detail="Solo el líder del trabajo puede hacer esto")
+        return trabajo
+
+    def _exigir_direccion(self, orden_id: int) -> dict:
+        trabajo = self._exigir_lider(orden_id)
+        if not self._puede_dirigir(trabajo):
+            raise HTTPException(
+                status_code=400, detail="El trabajo ya terminó: sus permisos de líder ya no aplican"
+            )
+        return trabajo
+
+    def _exigir_miembro(self, orden_id: int, mecanico_id: int) -> dict:
+        fila = self.con.execute(
+            """
+            SELECT m.id, m.nombre FROM equipo_orden e JOIN mecanicos m ON m.id = e.mecanico_id
+            WHERE e.orden_id = ? AND e.mecanico_id = ?
+            """,
+            (orden_id, mecanico_id),
+        ).fetchone()
+        if fila is None:
+            raise HTTPException(status_code=404, detail="Ese mecánico no es parte del equipo")
+        return dict(fila)
 
     def _cambiar_estado(self, orden_id: int, estado: str) -> None:
         self.con.execute("UPDATE ordenes_servicio SET estado = ? WHERE id = ?", (estado, orden_id))

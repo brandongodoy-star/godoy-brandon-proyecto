@@ -2,6 +2,7 @@ PRAGMA foreign_keys = ON;
 
 DROP TABLE IF EXISTS notificaciones;
 DROP TABLE IF EXISTS reportes;
+DROP TABLE IF EXISTS equipo_orden;
 DROP TABLE IF EXISTS movimientos_credito;
 DROP TABLE IF EXISTS usuarios;
 DROP TABLE IF EXISTS detalle_orden;
@@ -102,16 +103,29 @@ CREATE TABLE notificaciones (
     fecha       TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
--- Informes de los mecánicos sobre el equipo, los repuestos o la seguridad del taller
+-- Informes de los mecánicos sobre el equipo, los repuestos o la seguridad del taller.
+-- «desempeno» es el reporte del líder de un trabajo sobre un miembro de su equipo (sobre_mecanico_id).
 CREATE TABLE reportes (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    mecanico_id INTEGER NOT NULL REFERENCES mecanicos(id),
-    orden_id    INTEGER REFERENCES ordenes_servicio(id) ON DELETE SET NULL,
-    tipo        TEXT NOT NULL CHECK (tipo IN ('equipo', 'repuestos', 'seguridad', 'otro')),
-    titulo      TEXT NOT NULL,
-    descripcion TEXT NOT NULL,
-    estado      TEXT NOT NULL DEFAULT 'abierto' CHECK (estado IN ('abierto', 'resuelto')),
-    fecha       TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    mecanico_id       INTEGER NOT NULL REFERENCES mecanicos(id),
+    orden_id          INTEGER REFERENCES ordenes_servicio(id) ON DELETE SET NULL,
+    tipo              TEXT NOT NULL CHECK (tipo IN ('equipo', 'repuestos', 'seguridad', 'otro', 'desempeno')),
+    titulo            TEXT NOT NULL,
+    descripcion       TEXT NOT NULL,
+    estado            TEXT NOT NULL DEFAULT 'abierto' CHECK (estado IN ('abierto', 'resuelto')),
+    fecha             TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    sobre_mecanico_id INTEGER REFERENCES mecanicos(id)
+);
+
+-- Equipo de cada orden: el líder es ordenes_servicio.mecanico_id y aquí van los demás.
+-- El líder asigna la tarea de cada miembro y califica su trabajo.
+CREATE TABLE equipo_orden (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    orden_id     INTEGER NOT NULL REFERENCES ordenes_servicio(id) ON DELETE CASCADE,
+    mecanico_id  INTEGER NOT NULL REFERENCES mecanicos(id),
+    tarea        TEXT,
+    calificacion TEXT CHECK (calificacion IN ('excelente', 'bien', 'con problemas', 'rehacer')),
+    UNIQUE (orden_id, mecanico_id)
 );
 
 
@@ -196,4 +210,10 @@ INSERT INTO movimientos_credito (mecanico_id, orden_id, puntos, motivo, fecha) V
 (2, 2,    10,  'Orden #2 calificada «bien» (auto estándar)',     '2026-10-04 11:15:00'),
 (2, 9,    20,  'Orden #9 calificada «excelente» (auto estándar)', '2026-10-21 15:45:00');
 
-PRAGMA user_version = 2;
+INSERT INTO equipo_orden (orden_id, mecanico_id, tarea) VALUES
+(5,  2, 'Revisar soportes y suspensión trasera'),
+(7,  3, 'Revisar el sistema eléctrico del arranque'),
+(11, 4, 'Cambio de aceite de la transmisión'),
+(11, 2, NULL);
+
+PRAGMA user_version = 3;

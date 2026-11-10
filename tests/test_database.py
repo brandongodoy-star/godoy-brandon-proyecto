@@ -40,6 +40,7 @@ def test_base_nueva_carga_datos_de_prueba(ruta_bd):
     assert contar(ruta_bd, "repuestos") == 10
     assert contar(ruta_bd, "ordenes_servicio") == 11
     assert contar(ruta_bd, "detalle_orden") == 12
+    assert contar(ruta_bd, "equipo_orden") == 4
     assert version(ruta_bd) == database.VERSION_BD
 
 
@@ -77,6 +78,7 @@ def test_actualiza_una_base_de_la_version_anterior(ruta_bd):
         assert {c for (c,) in con.execute("SELECT DISTINCT categoria FROM vehiculos")} == {"estandar"}
         assert con.execute("SELECT SUM(creditos) FROM mecanicos").fetchone()[0] == 0
         assert con.execute("SELECT COUNT(*) FROM reportes").fetchone()[0] == 0
+        assert con.execute("SELECT COUNT(*) FROM equipo_orden").fetchone()[0] == 0
     finally:
         con.close()
 
@@ -108,5 +110,33 @@ def test_script_con_error_no_deja_base_a_medio_crear(ruta_bd, tmp_path, monkeypa
     con = sqlite3.connect(ruta_bd)
     try:
         assert con.execute("SELECT COUNT(*) FROM sqlite_master").fetchone()[0] == 0
+    finally:
+        con.close()
+
+
+def test_la_migracion_de_equipos_conserva_los_reportes(ruta_bd):
+    # Base en la versión 2 (con roles y créditos) que ya tiene un reporte guardado
+    con = sqlite3.connect(ruta_bd)
+    con.executescript(VERSION_1.read_text(encoding="utf-8"))
+    con.executescript((Path(database.CARPETA_MIGRACIONES) / database.MIGRACIONES[2]).read_text(encoding="utf-8"))
+    con.execute(
+        "INSERT INTO reportes (mecanico_id, tipo, titulo, descripcion) VALUES (1, 'equipo', 'Gata', 'No sube')"
+    )
+    con.commit()
+    con.close()
+    assert version(ruta_bd) == 2
+
+    database.inicializar_bd()
+
+    assert version(ruta_bd) == 3
+    con = sqlite3.connect(ruta_bd)
+    try:
+        fila = con.execute("SELECT titulo, tipo, sobre_mecanico_id FROM reportes").fetchone()
+        assert fila == ("Gata", "equipo", None)
+        # El nuevo tipo «desempeno» ya se acepta
+        con.execute(
+            "INSERT INTO reportes (mecanico_id, tipo, titulo, descripcion, sobre_mecanico_id) "
+            "VALUES (1, 'desempeno', 'Tarde', 'Llegó tarde', 2)"
+        )
     finally:
         con.close()

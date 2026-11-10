@@ -1,5 +1,5 @@
 from datetime import date
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 
@@ -104,6 +104,8 @@ class OrdenEntrada(Entrada):
     fecha_ingreso: date = Field(default_factory=date.today)
     diagnostico: str | None = Field(default=None, max_length=300)
     mano_obra: float = Field(default=0, ge=0)
+    # mecanico_id es el líder del trabajo; equipo son los demás mecánicos que lo acompañan
+    equipo: list[Annotated[int, Field(gt=0)]] = Field(default_factory=list, max_length=6)
 
     @field_validator("fecha_ingreso")
     @classmethod
@@ -193,6 +195,8 @@ class Trabajo(BaseModel):
     anio: int
     categoria: Categoria
     cliente: str
+    lider: str
+    soy_lider: bool
 
 
 class RepuestoDeTrabajo(BaseModel):
@@ -200,9 +204,27 @@ class RepuestoDeTrabajo(BaseModel):
     cantidad: int
 
 
-class TrabajoDetalle(Trabajo):
-    repuestos: list[RepuestoDeTrabajo]
-    creditos: int | None = None
+class MiembroEquipo(BaseModel):
+    mecanico_id: int
+    nombre: str
+    especialidad: str | None = None
+    nivel: str
+    es_lider: bool
+    tarea: str | None = None
+    calificacion: Calificacion | None = None
+
+
+class MiembroEntrada(Entrada):
+    """Lo que el líder cambia de un miembro: solo se actualizan los campos que envía."""
+
+    tarea: str | None = Field(default=None, max_length=200)
+    calificacion: Calificacion | None = None
+
+
+class ReporteMiembroEntrada(Entrada):
+    sobre_mecanico_id: int = Field(gt=0)
+    titulo: str = Field(min_length=3, max_length=100)
+    descripcion: str = Field(min_length=5, max_length=1000)
 
 
 class NivelSiguiente(BaseModel):
@@ -258,11 +280,22 @@ class ReporteRespuesta(BaseModel):
     mecanico_id: int
     mecanico: str
     orden_id: int | None = None
-    tipo: TipoReporte
+    tipo: TipoReporte | Literal["desempeno"]
     titulo: str
     descripcion: str
     estado: Literal["abierto", "resuelto"]
     fecha: str
+    sobre_mecanico_id: int | None = None
+    sobre_mecanico: str | None = None
+
+
+class TrabajoDetalle(Trabajo):
+    repuestos: list[RepuestoDeTrabajo]
+    creditos: int | None = None
+    equipo: list[MiembroEquipo]
+    # El líder solo dirige mientras el trabajo está «recibido» o «en reparacion»
+    puedo_dirigir: bool
+    reportes_equipo: list[ReporteRespuesta]
 
 
 class NotificacionRespuesta(BaseModel):

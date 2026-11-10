@@ -44,13 +44,25 @@ No hay registro público: las cuentas las entrega la empresa. La primera vez se 
 
 El mecánico entra a una interfaz limitada, sin precios ni datos de contacto de los clientes:
 
-- **Mis trabajos:** los vehículos que le asignó recepción. Puede empezar la reparación, enviar un aviso a recepción si todavía no está listo (por ejemplo, «falta un repuesto») y marcarlo como listo con una nota. Cada aviso llega a recepción como notificación.
+- **Mis trabajos:** los vehículos que le asignó recepción, como líder o como parte del equipo. Cualquiera del equipo puede enviar un aviso a recepción si todavía no está listo (por ejemplo, «falta un repuesto»). Cada aviso llega a recepción como notificación.
 - **Reportes:** informa fallas de equipo o herramientas, falta de repuestos, problemas de seguridad u otros. También llegan a recepción.
 - **Mi perfil:** sus datos personales, sus números, su historial de créditos y el cambio de contraseña.
 
+### Equipo y líder del trabajo
+
+Recepción arma el equipo de cada orden: elige el **líder del trabajo** (se sugiere el de más créditos, pero lo elige a mano) y los demás mecánicos que lo acompañan. Dentro de cada trabajo hay una sección **Equipo** con todos sus miembros y la tarea de cada uno.
+
+El líder administra ese trabajo, y solo ese, mientras está «recibido» o «en reparación»:
+
+- Asigna una tarea a cada miembro y califica su trabajo.
+- Reporta a un miembro si hace falta. El reporte se queda dentro del trabajo (no en la sección Reportes), le llega a recepción y el miembro reportado no lo ve.
+- Es el único que empieza la reparación y la marca como lista. Para marcarla lista debe haber calificado a todo el equipo.
+
+Al marcar el trabajo como listo, el líder pierde estos permisos. Los miembros pueden ser de menor nivel que el auto, para que aprendan junto al líder; el líder sí debe tener el nivel.
+
 ### Créditos (fama) y niveles
 
-Al entregar una orden, recepción califica el trabajo. La calificación suma o resta créditos al mecánico, y los autos más valiosos valen más:
+Al entregar una orden, recepción califica el trabajo. El líder gana o pierde los créditos de esa calificación. Cada miembro del equipo recibe la mitad según la calificación de recepción y la otra mitad según lo calificó su líder. Los autos más valiosos valen más:
 
 | Calificación | Estándar | Premium | Lujo |
 |---|---|---|---|
@@ -67,7 +79,9 @@ Los créditos nunca bajan de 0. Con más créditos el mecánico sube de nivel y 
 | Técnico | 100 | Estándar y Premium |
 | Maestro | 250 | Estándar, Premium y Lujo |
 
-Recepción no puede asignar un auto de una categoría mayor al nivel del mecánico. Si el mecánico baja de nivel, conserva los trabajos que ya tenía. Las reglas están en `creditos.py`.
+Por ejemplo, en un auto estándar que recepción califica «bien» (+10), un miembro que su líder calificó «excelente» (+20) gana (10 + 20) / 2 = 15.
+
+Recepción no puede poner como líder a un mecánico con menos nivel que la categoría del auto. Si baja de nivel, conserva los trabajos que ya tenía. Las reglas están en `creditos.py`.
 
 La pantalla de recepción para ver las notificaciones y los reportes se hará después. Por ahora ya existen en la API: `GET /notificaciones` y `GET /reportes`.
 
@@ -94,7 +108,7 @@ Tiene modo claro u oscuro y diseño adaptado al celular. La sesión se guarda so
 | Repuestos | `/repuestos` | |
 | Órdenes de servicio | `/ordenes` | Filtrar por `?estado=` o `?vehiculo_id=` |
 | Cuentas (solo administración) | `/usuarios` | Sin edición: se crean y se eliminan |
-| Área del mecánico | `/mecanico/...` | Perfil, trabajos, avisos y reportes del mecánico |
+| Área del mecánico | `/mecanico/...` | Perfil, trabajos, avisos, reportes, y equipo del líder (`/mecanico/trabajos/{id}/equipo/{miembro}` y `/reportes-equipo`) |
 | Notificaciones y reportes | `/notificaciones`, `/reportes` | Para administración y recepción |
 
 Rutas propias de una orden:

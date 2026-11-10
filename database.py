@@ -8,8 +8,8 @@ RUTA_SCRIPT = os.path.join(CARPETA, "crear_bd.sql")
 CARPETA_MIGRACIONES = os.path.join(CARPETA, "migraciones")
 
 # Versión de la estructura que trae crear_bd.sql y migración que lleva a cada versión
-VERSION_BD = 2
-MIGRACIONES = {2: "002_roles_y_creditos.sql"}
+VERSION_BD = 3
+MIGRACIONES = {2: "002_roles_y_creditos.sql", 3: "003_equipos.sql"}
 
 
 @contextmanager

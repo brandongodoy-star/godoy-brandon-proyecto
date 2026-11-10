@@ -334,7 +334,7 @@ td .mono, td .insignia { white-space: nowrap; }
 .tarjeta-orden .abajo { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 8px; border-top: 1px dashed var(--borde); font-size: 12.5px; color: var(--texto-tenue); }
 .mecanico-mini { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .mecanico-mini .avatar { width: 22px; height: 22px; font-size: 10px; }
-.mecanico-mini span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mecanico-mini span:not(.avatar):not(.mas-equipo) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ===================== Detalle de la orden ===================== */
 .pasos { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 4px 0 20px; }
@@ -427,6 +427,48 @@ td .mono, td .insignia { white-space: nowrap; }
   display: flex; align-items: center; gap: 10px; margin-top: 20px; padding: 12px 14px;
   border-radius: var(--radio-chico); background: var(--listo-suave); color: var(--listo); font-weight: 600; font-size: 14px;
 }
+
+/* ===================== Equipo de trabajo ===================== */
+.nota-lider, .nota-neutra {
+  display: flex; align-items: flex-start; gap: 10px; margin: 20px 0 0; padding: 12px 14px;
+  border-radius: var(--radio-chico); font-size: 14px; line-height: 1.45;
+}
+.nota-lider { background: var(--oro-suave); color: var(--texto); border: 1px solid var(--oro); }
+.nota-lider .icono { color: var(--oro); margin-top: 1px; }
+.nota-neutra { background: var(--superficie-2); color: var(--texto-suave); border: 1px solid var(--borde); }
+.nota-neutra .icono { margin-top: 1px; }
+.dialogo-cuerpo .seccion-titulo { margin-top: 20px; }
+.lista-equipo { list-style: none; margin: 0; padding: 0; border: 1px solid var(--borde); border-radius: var(--radio-chico); }
+.lista-equipo .miembro { display: grid; gap: 10px; padding: 12px; }
+.lista-equipo .miembro + .miembro { border-top: 1px solid var(--borde); }
+.miembro-cabecera { display: flex; align-items: center; gap: 10px; }
+.miembro-cabecera .principal { flex: 1; min-width: 0; display: grid; }
+.miembro-cabecera .principal span { font-size: 13px; color: var(--texto-tenue); }
+.miembro .tarea { margin-left: 44px; font-size: 14px; color: var(--texto-suave); }
+.form-miembro { display: grid; grid-template-columns: minmax(0, 1fr) 160px auto; gap: 8px; margin-left: 44px; }
+.form-miembro input, .form-miembro select {
+  min-height: 38px; padding: 7px 10px; background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio-chico);
+}
+.form-miembro input:focus, .form-miembro select:focus { outline: none; border-color: var(--acento); box-shadow: 0 0 0 3px var(--acento-suave); }
+.form-miembro .boton { min-height: 38px; }
+.lista-reportes-equipo { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.lista-reportes-equipo li { padding: 10px 12px; border-radius: var(--radio-chico); background: var(--peligro-suave); }
+.lista-reportes-equipo p { font-size: 14px; color: var(--texto-suave); white-space: pre-line; }
+.lista-reportes-equipo .texto-tenue { font-size: 12.5px; }
+.reporte-equipo { margin-top: 12px; padding: 14px; border: 1px dashed var(--borde); border-radius: var(--radio-chico); }
+.reporte-equipo .rejilla-campos { margin-bottom: 4px; }
+.campo-checks { margin: 0; padding: 0; border: 0; min-width: 0; }
+.campo-checks legend { padding: 0; margin-bottom: 6px; font-size: 13px; font-weight: 700; color: var(--texto-suave); }
+.lista-checks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.check { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--borde); border-radius: var(--radio-chico); cursor: pointer; font-size: 14px; }
+.check:has(input:checked) { border-color: var(--acento); background: var(--acento-suave); }
+.check input { width: 16px; height: 16px; accent-color: var(--acento); flex: none; }
+.check.deshabilitado { opacity: 0.45; cursor: not-allowed; }
+.tarjeta-orden .abajo > span:last-child { white-space: nowrap; }
+.mas-equipo { flex: none; padding: 0 6px; border-radius: 99px; background: var(--superficie-2); border: 1px solid var(--borde); font-size: 11px; font-weight: 800; color: var(--texto-suave); }
+.chips-equipo { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.chip-equipo { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 3px; border-radius: 99px; background: var(--superficie); border: 1px solid var(--borde); font-size: 13px; font-weight: 600; }
+.chip-equipo .avatar { width: 22px; height: 22px; font-size: 10px; }
 .resultado-trabajo { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 20px; }
 .resultado-trabajo > div { display: grid; gap: 6px; justify-items: start; padding: 12px 14px; border-radius: var(--radio-chico); background: var(--superficie-2); border: 1px solid var(--borde); }
 .resultado-trabajo small { font-size: 12px; font-weight: 700; color: var(--texto-tenue); text-transform: uppercase; letter-spacing: 0.04em; }
@@ -512,5 +554,9 @@ td .mono, td .insignia { white-space: nowrap; }
   .chips-categoria, .resultado-trabajo { grid-template-columns: 1fr; }
   .perfil-cabecera { flex-wrap: wrap; }
   .barras-calificacion li { grid-template-columns: 110px 1fr 24px; }
+  .form-miembro { grid-template-columns: 1fr 1fr; margin-left: 0; }
+  .form-miembro input { grid-column: 1 / -1; }
+  .miembro .tarea { margin-left: 0; }
+  .lista-checks { grid-template-columns: 1fr; }
   .tabla-puntos td, .tabla-puntos th { padding: 8px 6px; font-size: 12.5px; }
 }

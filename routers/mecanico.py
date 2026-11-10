@@ -4,9 +4,11 @@ from database import obtener_conexion
 from modelos import (
     AvisoEntrada,
     MensajeRespuesta,
+    MiembroEntrada,
     NotaEntrada,
     PerfilMecanico,
     ReporteEntrada,
+    ReporteMiembroEntrada,
     ReporteRespuesta,
     Trabajo,
     TrabajoDetalle,
@@ -65,6 +67,28 @@ def enviar_aviso(orden_id: int, datos: AvisoEntrada, usuario: dict = Depends(mec
     with obtener_conexion() as con:
         RepositorioTrabajos(con, usuario["mecanico_id"]).enviar_aviso(orden_id, datos.mensaje)
     return {"mensaje": "Aviso enviado a recepción"}
+
+
+# ---------- Solo el líder del trabajo, mientras el trabajo no termine ----------
+@router.put("/trabajos/{orden_id}/equipo/{miembro_id}", response_model=TrabajoDetalle)
+def dirigir_miembro(
+    orden_id: int, miembro_id: int, datos: MiembroEntrada, usuario: dict = Depends(mecanico_actual)
+):
+    """Asigna la tarea de un miembro y/o califica su trabajo (solo cambia lo que se envía)."""
+    with obtener_conexion() as con:
+        return RepositorioTrabajos(con, usuario["mecanico_id"]).dirigir_miembro(
+            orden_id, miembro_id, datos.model_dump(include=datos.model_fields_set)
+        )
+
+
+@router.post(
+    "/trabajos/{orden_id}/reportes-equipo",
+    response_model=ReporteRespuesta,
+    status_code=status.HTTP_201_CREATED,
+)
+def reportar_miembro(orden_id: int, datos: ReporteMiembroEntrada, usuario: dict = Depends(mecanico_actual)):
+    with obtener_conexion() as con:
+        return RepositorioTrabajos(con, usuario["mecanico_id"]).reportar_miembro(orden_id, datos.model_dump())
 
 
 @router.get("/reportes", response_model=list[ReporteRespuesta])
