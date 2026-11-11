@@ -362,6 +362,9 @@ td .mono, td .insignia { white-space: nowrap; }
 .totales div span:first-child { color: var(--texto-suave); }
 .totales .total { padding-top: 10px; margin-top: 4px; border-top: 1px solid var(--borde); font-size: 18px; font-weight: 800; }
 .totales .total span:first-child { color: var(--texto); }
+.totales .saldo { align-items: center; font-weight: 800; }
+.totales .saldo span:last-child { display: inline-flex; align-items: center; gap: 8px; }
+.totales > .boton { margin-top: 8px; }
 
 /* ===================== Diálogos ===================== */
 .dialogo {
@@ -469,6 +472,46 @@ td .mono, td .insignia { white-space: nowrap; }
 .chips-equipo { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .chip-equipo { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 3px; border-radius: 99px; background: var(--superficie); border: 1px solid var(--borde); font-size: 13px; font-weight: 600; }
 .chip-equipo .avatar { width: 22px; height: 22px; font-size: 10px; }
+
+/* ===================== Recepción ===================== */
+.boton-chico { min-height: 32px; padding: 0 12px; font-size: 13px; }
+.boton-chico .icono { width: 15px; height: 15px; }
+.pestanas-filtro { display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 4px; border-radius: 11px; background: var(--superficie-2); border: 1px solid var(--borde); }
+.pestanas-bandeja { margin-bottom: 16px; }
+.pestana-filtro { display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; padding: 7px 14px; border-radius: 8px; font-weight: 700; font-size: 14px; color: var(--texto-suave); cursor: pointer; }
+.pestana-filtro.activa { background: var(--superficie); color: var(--texto); box-shadow: var(--sombra); }
+.contador-pestana { min-width: 20px; padding: 0 6px; border-radius: 99px; background: var(--acento); color: #fff; font-size: 12px; text-align: center; }
+.rejilla-tarjetas { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; margin-bottom: 20px; }
+.tarjeta-bandeja { display: grid; gap: 6px; align-content: start; padding: 16px; }
+.tarjeta-bandeja .arriba { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 2px; }
+.tarjeta-bandeja .numero-orden { font-family: var(--fuente-mono); font-size: 12px; color: var(--texto-tenue); font-weight: 700; }
+.tarjeta-bandeja .pide { font-size: 17px; }
+.tarjeta-bandeja p { font-size: 14px; color: var(--texto-suave); white-space: pre-line; }
+.tarjeta-bandeja .de-quien { font-size: 12.5px; }
+.tarjeta-bandeja .sobre { font-size: 13.5px; color: var(--texto-suave); }
+.tarjeta-bandeja.de-lider { border-color: var(--oro); }
+.acciones-tarjeta { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+.lista li.no-leida { background: var(--acento-suave); }
+.lista li.no-leida .principal strong { font-weight: 800; }
+.fila-lista .boton-icono { flex: none; }
+.leyenda-tres { grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0 0 4px; }
+.lista-historial, .lista-bordeada { list-style: none; margin: 0; padding: 0; border: 1px solid var(--borde); border-radius: var(--radio-chico); overflow: hidden; }
+.lista-historial li + li, .lista-bordeada li + li { border-top: 1px solid var(--borde); }
+.lista-bordeada .fila-lista { padding: 10px 12px; }
+.historial-montos { display: grid; justify-items: end; font-size: 13px; white-space: nowrap; }
+.nota-puntos h2 { font-size: 16px; font-weight: 800; margin-bottom: 6px; }
+.nota-puntos p { font-size: 14px; color: var(--texto-suave); }
+.aviso-saldo { display: flex; align-items: flex-start; gap: 8px; margin-top: 10px !important; padding: 10px 12px; border-radius: var(--radio-chico); background: var(--reparacion-suave); color: var(--texto) !important; font-size: 13.5px; }
+.aviso-saldo .icono { color: var(--reparacion); flex: none; margin-top: 2px; }
+.dato-indicaciones { background: var(--reparacion-suave); border-color: var(--reparacion); }
+.lista-peticiones { list-style: none; margin: 0; padding: 0; border: 1px solid var(--borde); border-radius: var(--radio-chico); }
+.lista-peticiones li { display: flex; align-items: center; gap: 10px; padding: 10px 12px; }
+.lista-peticiones li + li { border-top: 1px solid var(--borde); }
+.lista-peticiones .principal { flex: 1; min-width: 0; display: grid; font-size: 14px; }
+.lista-peticiones .principal span { font-size: 12.5px; color: var(--texto-tenue); }
+.pedir-material { display: grid; grid-template-columns: minmax(0, 1fr) 100px; gap: 10px; align-items: end; margin-top: 12px; padding: 14px; border: 1px dashed var(--borde); border-radius: var(--radio-chico); }
+.pedir-material .completo { grid-column: 1 / -1; }
+.pedir-material .boton { justify-self: start; }
 .resultado-trabajo { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 20px; }
 .resultado-trabajo > div { display: grid; gap: 6px; justify-items: start; padding: 12px 14px; border-radius: var(--radio-chico); background: var(--superficie-2); border: 1px solid var(--borde); }
 .resultado-trabajo small { font-size: 12px; font-weight: 700; color: var(--texto-tenue); text-transform: uppercase; letter-spacing: 0.04em; }
@@ -559,4 +602,8 @@ td .mono, td .insignia { white-space: nowrap; }
   .miembro .tarea { margin-left: 0; }
   .lista-checks { grid-template-columns: 1fr; }
   .tabla-puntos td, .tabla-puntos th { padding: 8px 6px; font-size: 12.5px; }
+  .rejilla-tarjetas { grid-template-columns: 1fr; }
+  .leyenda-tres { grid-template-columns: 1fr 1fr; }
+  .pedir-material { grid-template-columns: 1fr 80px; }
+  .historial-montos { display: none; }
 }

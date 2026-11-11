@@ -7,6 +7,12 @@ from creditos import NOMBRE_CATEGORIA, nivel_de, puede_trabajar, puntos_de_miemb
 ESTADOS_ORDEN = ("recibido", "en reparacion", "listo", "entregado")
 ESTADOS_EDITABLES = ("recibido", "en reparacion")
 
+# Total (mano de obra + repuestos) y lo pagado de la orden «o», para usar dentro de un SELECT
+TOTAL_ORDEN = """(o.mano_obra + COALESCE((
+    SELECT SUM(d.cantidad * r.precio) FROM detalle_orden d JOIN repuestos r ON r.id = d.repuesto_id
+    WHERE d.orden_id = o.id), 0))"""
+PAGADO_ORDEN = "COALESCE((SELECT SUM(p.monto) FROM pagos p WHERE p.orden_id = o.id), 0)"
+
 
 class RepositorioBase:
     """Operaciones comunes sobre una tabla. Cada repositorio hijo indica su tabla y columnas.
@@ -79,12 +85,59 @@ class RepositorioVehiculo(RepositorioBase):
         RepositorioCliente(self.con).obtener_por_id(datos["cliente_id"])
         return super().actualizar(vehiculo_id, datos)
 
+    def historial(self, vehiculo_id: int) -> list[dict]:
+        """Todos los proyectos que ha tenido el vehículo, con su costo y lo pagado."""
+        self.obtener_por_id(vehiculo_id)
+        filas = self.con.execute(
+            f"""
+            SELECT o.id, o.estado, o.fecha_ingreso, o.diagnostico, o.calificacion, l.nombre AS lider,
+                   {TOTAL_ORDEN} AS total, {PAGADO_ORDEN} AS pagado
+            FROM ordenes_servicio o JOIN mecanicos l ON l.id = o.mecanico_id
+            WHERE o.vehiculo_id = ? ORDER BY o.fecha_ingreso DESC, o.id DESC
+            """,
+            (vehiculo_id,),
+        ).fetchall()
+        return [dict(fila) for fila in filas]
+
 
 class RepositorioMecanico(RepositorioBase):
     tabla = "mecanicos"
-    # Los créditos no se editan a mano: solo cambian con las calificaciones de los trabajos
+    # Los créditos no se editan como un dato más: cambian con las calificaciones y los ajustes
     columnas = ("nombre", "especialidad", "activo", "telefono", "correo", "fecha_contratacion")
     no_encontrado = "Mecánico no encontrado"
+
+    def sumar_creditos(self, mecanico_id: int, orden_id: int | None, puntos: int, motivo: str) -> int:
+        """Suma (o resta) créditos y deja la línea en el historial. Devuelve los créditos nuevos."""
+        mecanico = self.obtener_por_id(mecanico_id)
+        # Los créditos nunca bajan de 0; en el historial queda lo que de verdad cambió
+        nuevos = max(0, mecanico["creditos"] + puntos)
+        self.con.execute("UPDATE mecanicos SET creditos = ? WHERE id = ?", (nuevos, mecanico_id))
+        self.con.execute(
+            "INSERT INTO movimientos_credito (mecanico_id, orden_id, puntos, motivo) VALUES (?, ?, ?, ?)",
+            (mecanico_id, orden_id, nuevos - mecanico["creditos"], motivo),
+        )
+        return nuevos
+
+    def ajustar_creditos(self, mecanico_id: int, puntos: int, motivo: str, orden_id: int | None) -> dict:
+        """Ajuste a mano de recepción, por ejemplo por un trabajo extra o una falta."""
+        if orden_id is not None:
+            orden = RepositorioOrden(self.con).obtener_por_id(orden_id)
+            if mecanico_id != orden["mecanico_id"] and mecanico_id not in orden["equipo"]:
+                raise HTTPException(status_code=400, detail="Ese mecánico no trabajó en ese proyecto")
+        referencia = f" (proyecto #{orden_id})" if orden_id else ""
+        self.sumar_creditos(mecanico_id, orden_id, puntos, f"Ajuste de recepción{referencia}: {motivo}")
+        return self.obtener_por_id(mecanico_id)
+
+    def historial_creditos(self, mecanico_id: int) -> list[dict]:
+        self.obtener_por_id(mecanico_id)
+        filas = self.con.execute(
+            """
+            SELECT fecha, puntos, motivo, orden_id FROM movimientos_credito
+            WHERE mecanico_id = ? ORDER BY fecha DESC, id DESC LIMIT 50
+            """,
+            (mecanico_id,),
+        ).fetchall()
+        return [dict(fila) for fila in filas]
 
 
 class RepositorioRepuesto(RepositorioBase):
@@ -98,7 +151,7 @@ class RepositorioRepuesto(RepositorioBase):
 
 class RepositorioOrden(RepositorioBase):
     tabla = "ordenes_servicio"
-    columnas = ("vehiculo_id", "mecanico_id", "fecha_ingreso", "diagnostico", "mano_obra")
+    columnas = ("vehiculo_id", "mecanico_id", "fecha_ingreso", "diagnostico", "mano_obra", "indicaciones")
     no_encontrado = "Orden no encontrada"
 
     # mecanico_id es el líder del trabajo; los demás miembros del equipo están en equipo_orden
@@ -222,7 +275,8 @@ class RepositorioOrden(RepositorioBase):
         self.con.execute(
             "UPDATE ordenes_servicio SET calificacion = ? WHERE id = ?", (calificacion, orden["id"])
         )
-        self._sumar_creditos(
+        mecanicos = RepositorioMecanico(self.con)
+        mecanicos.sumar_creditos(
             orden["mecanico_id"],
             orden["id"],
             puntos_por(calificacion, categoria),
@@ -233,22 +287,12 @@ class RepositorioOrden(RepositorioBase):
         ).fetchall()
         for miembro in miembros:
             del_lider = miembro["calificacion"] or "sin calificar"
-            self._sumar_creditos(
+            mecanicos.sumar_creditos(
                 miembro["mecanico_id"],
                 orden["id"],
                 puntos_de_miembro(calificacion, miembro["calificacion"], categoria),
                 f"Orden #{orden['id']} en equipo: recepción «{calificacion}», líder «{del_lider}» ({auto})",
             )
-
-    def _sumar_creditos(self, mecanico_id: int, orden_id: int, puntos: int, motivo: str) -> None:
-        mecanico = RepositorioMecanico(self.con).obtener_por_id(mecanico_id)
-        # Los créditos nunca bajan de 0; en el historial queda lo que de verdad cambió
-        nuevos = max(0, mecanico["creditos"] + puntos)
-        self.con.execute("UPDATE mecanicos SET creditos = ? WHERE id = ?", (nuevos, mecanico_id))
-        self.con.execute(
-            "INSERT INTO movimientos_credito (mecanico_id, orden_id, puntos, motivo) VALUES (?, ?, ?, ?)",
-            (mecanico_id, orden_id, nuevos - mecanico["creditos"], motivo),
-        )
 
     def _validar_referencias(self, datos: dict, actual: dict | None = None) -> None:
         vehiculo = RepositorioVehiculo(self.con).obtener_por_id(datos["vehiculo_id"])
@@ -432,7 +476,7 @@ class RepositorioTrabajos:
     PARTICIPA = """(o.mecanico_id = :m OR EXISTS (
         SELECT 1 FROM equipo_orden e WHERE e.orden_id = o.id AND e.mecanico_id = :m))"""
     CONSULTA = f"""
-        SELECT o.id, o.estado, o.fecha_ingreso, o.diagnostico, o.calificacion,
+        SELECT o.id, o.estado, o.fecha_ingreso, o.diagnostico, o.calificacion, o.indicaciones,
                v.placa, v.marca, v.modelo, v.anio, v.categoria, c.nombre AS cliente,
                l.nombre AS lider, o.mecanico_id = :m AS soy_lider
         FROM ordenes_servicio o
@@ -489,7 +533,18 @@ class RepositorioTrabajos:
             "equipo": self._equipo(orden_id),
             "puedo_dirigir": self._puede_dirigir(trabajo),
             "reportes_equipo": reportes,
+            "peticiones": RepositorioPeticion(self.con).listar(orden_id=orden_id),
         }
+
+    def pedir_material(self, orden_id: int, datos: dict) -> dict:
+        """Cualquiera del equipo puede pedir material al almacén mientras dura el trabajo."""
+        trabajo = self.obtener(orden_id)
+        if trabajo["estado"] not in ESTADOS_EDITABLES:
+            raise HTTPException(status_code=400, detail="Este trabajo ya terminó")
+        RepositorioRepuesto(self.con).obtener_por_id(datos["repuesto_id"])
+        peticiones = RepositorioPeticion(self.con)
+        peticion = peticiones.crear({**datos, "orden_id": orden_id, "mecanico_id": self.mecanico_id})
+        return peticiones.obtener_completa(peticion["id"])
 
     def iniciar(self, orden_id: int) -> dict:
         trabajo = self._exigir_lider(orden_id)
@@ -656,3 +711,113 @@ class RepositorioTrabajos:
         RepositorioNotificacion(self.con).crear(
             {"tipo": tipo, "mensaje": mensaje, "orden_id": orden_id, "mecanico_id": self.mecanico_id}
         )
+
+
+class RepositorioPeticion(RepositorioBase):
+    """Material que piden los mecánicos; recepción lo envía desde el almacén o lo rechaza."""
+
+    tabla = "peticiones"
+    columnas = ("orden_id", "mecanico_id", "repuesto_id", "cantidad", "motivo")
+    no_encontrado = "Petición no encontrada"
+
+    CONSULTA_COMPLETA = """
+        SELECT p.*, v.placa, m.nombre AS mecanico, r.nombre AS repuesto, r.existencia
+        FROM peticiones p
+        JOIN ordenes_servicio o ON o.id = p.orden_id
+        JOIN vehiculos v ON v.id = o.vehiculo_id
+        JOIN mecanicos m ON m.id = p.mecanico_id
+        JOIN repuestos r ON r.id = p.repuesto_id
+    """
+
+    def listar(self, estado: str | None = None, orden_id: int | None = None) -> list[dict]:
+        filtros = {"p.estado": estado, "p.orden_id": orden_id}
+        filtros = {campo: valor for campo, valor in filtros.items() if valor is not None}
+        where = " AND ".join(f"{campo} = ?" for campo in filtros)
+        filas = self.con.execute(
+            self.CONSULTA_COMPLETA + (f" WHERE {where}" if where else "") + " ORDER BY p.id DESC",
+            list(filtros.values()),
+        ).fetchall()
+        return [dict(fila) for fila in filas]
+
+    def obtener_completa(self, peticion_id: int) -> dict:
+        self.obtener_por_id(peticion_id)
+        return dict(self.con.execute(self.CONSULTA_COMPLETA + " WHERE p.id = ?", (peticion_id,)).fetchone())
+
+    def enviar(self, peticion_id: int) -> dict:
+        """Manda el material: se agrega al proyecto y se descuenta del almacén."""
+        peticion = self._exigir_pendiente(peticion_id)
+        RepositorioDetalle(self.con).agregar(peticion["orden_id"], peticion["repuesto_id"], peticion["cantidad"])
+        self._responder(peticion_id, "enviada", None)
+        return self.obtener_completa(peticion_id)
+
+    def rechazar(self, peticion_id: int, respuesta: str) -> dict:
+        self._exigir_pendiente(peticion_id)
+        self._responder(peticion_id, "rechazada", respuesta)
+        return self.obtener_completa(peticion_id)
+
+    def _exigir_pendiente(self, peticion_id: int) -> dict:
+        peticion = self.obtener_por_id(peticion_id)
+        if peticion["estado"] != "pendiente":
+            raise HTTPException(status_code=400, detail=f"Esta petición ya fue {peticion['estado']}")
+        return peticion
+
+    def _responder(self, peticion_id: int, estado: str, respuesta: str | None) -> None:
+        self.con.execute(
+            """
+            UPDATE peticiones SET estado = ?, respuesta = ?, fecha_respuesta = datetime('now', 'localtime')
+            WHERE id = ?
+            """,
+            (estado, respuesta, peticion_id),
+        )
+
+
+class RepositorioPago(RepositorioBase):
+    """Cobros a los clientes. Un proyecto se puede pagar en partes, sin pasarse del total."""
+
+    tabla = "pagos"
+    columnas = ("orden_id", "monto", "metodo", "referencia", "registrado_por")
+    no_encontrado = "Pago no encontrado"
+
+    CONSULTA_COBROS = f"""
+        SELECT o.id, o.estado, o.fecha_ingreso, v.placa, v.marca, v.modelo,
+               c.nombre AS cliente, c.telefono, {TOTAL_ORDEN} AS total, {PAGADO_ORDEN} AS pagado
+        FROM ordenes_servicio o
+        JOIN vehiculos v ON v.id = o.vehiculo_id
+        JOIN clientes c ON c.id = v.cliente_id
+    """
+
+    def cobros(self, estado_pago: str | None = None) -> list[dict]:
+        filas = self.con.execute(self.CONSULTA_COBROS + " ORDER BY o.id DESC").fetchall()
+        cobros = [self._con_saldo(fila) for fila in filas]
+        return [c for c in cobros if estado_pago is None or c["estado_pago"] == estado_pago]
+
+    def cobro(self, orden_id: int) -> dict:
+        RepositorioOrden(self.con).obtener_por_id(orden_id)
+        fila = self.con.execute(self.CONSULTA_COBROS + " WHERE o.id = ?", (orden_id,)).fetchone()
+        pagos = self.con.execute(
+            "SELECT * FROM pagos WHERE orden_id = ? ORDER BY fecha, id", (orden_id,)
+        ).fetchall()
+        return {**self._con_saldo(fila), "pagos": [dict(pago) for pago in pagos]}
+
+    def registrar(self, orden_id: int, datos: dict, usuario: str) -> dict:
+        saldo = self.cobro(orden_id)["saldo"]
+        if saldo <= 0:
+            raise HTTPException(status_code=400, detail="Este proyecto ya está pagado")
+        if round(datos["monto"], 2) > saldo:
+            raise HTTPException(status_code=400, detail=f"El pago es mayor que el saldo (L {saldo:,.2f})")
+        self.crear({**datos, "monto": round(datos["monto"], 2), "orden_id": orden_id, "registrado_por": usuario})
+        return self.cobro(orden_id)
+
+    @staticmethod
+    def _con_saldo(fila: sqlite3.Row) -> dict:
+        cobro = dict(fila)
+        cobro["total"] = round(cobro["total"], 2)
+        cobro["pagado"] = round(cobro["pagado"], 2)
+        cobro["saldo"] = round(cobro["total"] - cobro["pagado"], 2)
+        if cobro["saldo"] <= 0 and cobro["pagado"] > 0:
+            cobro["estado_pago"] = "pagado"
+        elif cobro["pagado"] > 0:
+            cobro["estado_pago"] = "parcial"
+        else:
+            cobro["estado_pago"] = "pendiente"
+        return cobro

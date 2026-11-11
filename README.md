@@ -83,18 +83,31 @@ Por ejemplo, en un auto estándar que recepción califica «bien» (+10), un mie
 
 Recepción no puede poner como líder a un mecánico con menos nivel que la categoría del auto. Si baja de nivel, conserva los trabajos que ya tenía. Las reglas están en `creditos.py`.
 
-La pantalla de recepción para ver las notificaciones y los reportes se hará después. Por ahora ya existen en la API: `GET /notificaciones` y `GET /reportes`.
+Además, desde cada trabajo cualquier miembro del equipo puede **pedir material** al almacén (repuesto, cantidad y para qué). Ve si su petición está pendiente, enviada o rechazada.
+
+## Área de recepción
+
+Recepción (y administración) tiene más poder que los mecánicos:
+
+| Sección | Qué hace |
+|---|---|
+| **Proyectos** | Proyectos de trabajo: vehículo, datos del cliente, problema, **indicaciones del cliente** (los mecánicos también las ven), mecánico líder y equipo. Al abrir uno se ve su costo, lo pagado y el saldo. |
+| **Bandeja** | Recibe lo que mandan los mecánicos: **peticiones de material** (enviar o rechazar con un motivo), **reportes** (incluidos los del líder sobre su equipo; se marcan como resueltos) y **avisos** (trabajo listo, cómo va). |
+| **Cobros** | Total, pagado y saldo de cada proyecto. Se cobra en partes (anticipos) con efectivo, tarjeta o transferencia, sin pasarse del saldo. Solo administración puede anular un pago. |
+| **Almacén** | Inventario de repuestos. Con «Enviar» se manda material a un proyecto activo: se descuenta del almacén y se suma al costo. |
+| **Puntuaciones** | Ranking de mecánicos, proyectos listos para calificar y **ajuste manual de créditos** (de -100 a 100, con motivo y proyecto opcional). El mecánico ve el motivo en su historial. |
+| **Vehículos** | Registro de vehículos; con el reloj se abre su **historial**: todos sus proyectos, cuánto se ha gastado y cuánto se debe. |
+
+Entregar un proyecto con saldo pendiente es posible: el sistema avisa cuánto debe el cliente, y el saldo queda en Cobros.
 
 ## Interfaz web
 
 La carpeta `frontend/` tiene la página que FastAPI sirve en la raíz (`index.html`, `estilos.css` y `app.js`, sin librerías externas). Lo que se ve depende del rol:
 
-- **Administración y recepción:**
-  - **Resumen:** órdenes por estado, trabajo en curso, repuestos con poca existencia, y nivel y carga de cada mecánico.
-  - **Órdenes:** tablero con una columna por estado. Al abrir una orden se ven sus datos, se agregan o quitan repuestos, se ve el total y se pasa al siguiente estado. Para entregarla hay que calificar el trabajo.
-  - **Clientes, Vehículos, Mecánicos y Repuestos:** tablas con búsqueda y formularios para crear, editar y eliminar.
-  - **Cuentas:** solo para administración.
+- **Administración y recepción:** Resumen, Proyectos (tablero por estado), Bandeja, Cobros, Almacén, Puntuaciones, Vehículos, Clientes y Mecánicos. **Cuentas** es solo para administración.
 - **Mecánico:** el área descrita arriba.
+
+La página pide sus archivos con un número de versión (`app.js?v=7`). Si se cambian, hay que subir ese número en `index.html` para que los navegadores bajen la versión nueva.
 
 Tiene modo claro u oscuro y diseño adaptado al celular. La sesión se guarda solo mientras la pestaña esté abierta.
 
@@ -110,6 +123,9 @@ Tiene modo claro u oscuro y diseño adaptado al celular. La sesión se guarda so
 | Cuentas (solo administración) | `/usuarios` | Sin edición: se crean y se eliminan |
 | Área del mecánico | `/mecanico/...` | Perfil, trabajos, avisos, reportes, y equipo del líder (`/mecanico/trabajos/{id}/equipo/{miembro}` y `/reportes-equipo`) |
 | Notificaciones y reportes | `/notificaciones`, `/reportes` | Para administración y recepción |
+| Peticiones de material | `/peticiones` | Enviar (`/{id}/enviar`) o rechazar (`/{id}/rechazar`) |
+| Cobros | `/cobros`, `/ordenes/{id}/cobro`, `/ordenes/{id}/pagos` | Anular: `DELETE /pagos/{id}` (solo administración) |
+| Créditos e historial | `/mecanicos/{id}/creditos`, `/vehiculos/{id}/historial` | Ajuste manual de créditos e historial de un vehículo |
 
 Rutas propias de una orden:
 

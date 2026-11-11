@@ -7,13 +7,16 @@ from modelos import (
     MiembroEntrada,
     NotaEntrada,
     PerfilMecanico,
+    PeticionEntrada,
+    PeticionRespuesta,
     ReporteEntrada,
     ReporteMiembroEntrada,
     ReporteRespuesta,
+    RepuestoDisponible,
     Trabajo,
     TrabajoDetalle,
 )
-from repositorios import RepositorioReporte, RepositorioTrabajos
+from repositorios import RepositorioReporte, RepositorioRepuesto, RepositorioTrabajos
 from seguridad import solo_mecanico
 
 # Área limitada del mecánico: solo ve sus trabajos, sus reportes y su perfil
@@ -67,6 +70,22 @@ def enviar_aviso(orden_id: int, datos: AvisoEntrada, usuario: dict = Depends(mec
     with obtener_conexion() as con:
         RepositorioTrabajos(con, usuario["mecanico_id"]).enviar_aviso(orden_id, datos.mensaje)
     return {"mensaje": "Aviso enviado a recepción"}
+
+
+# ---------- Material del almacén ----------
+@router.get("/repuestos", response_model=list[RepuestoDisponible])
+def repuestos_del_almacen(_: dict = Depends(mecanico_actual)):
+    with obtener_conexion() as con:
+        return RepositorioRepuesto(con).obtener_todos()
+
+
+@router.post(
+    "/trabajos/{orden_id}/peticiones", response_model=PeticionRespuesta, status_code=status.HTTP_201_CREATED
+)
+def pedir_material(orden_id: int, datos: PeticionEntrada, usuario: dict = Depends(mecanico_actual)):
+    """Cualquiera del equipo pide material; recepción lo envía o lo rechaza desde su bandeja."""
+    with obtener_conexion() as con:
+        return RepositorioTrabajos(con, usuario["mecanico_id"]).pedir_material(orden_id, datos.model_dump())
 
 
 # ---------- Solo el líder del trabajo, mientras el trabajo no termine ----------

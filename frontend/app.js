@@ -56,6 +56,9 @@ const ICONOS = {
   buscar: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
   alerta: '<path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>',
   check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  bandeja: '<path d="M3 13l2.5-7.5A2 2 0 0 1 7.4 4h9.2a2 2 0 0 1 1.9 1.5L21 13v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 13h5l1.5 2.5h5L16 13h5"/>',
+  dinero: '<rect x="2.5" y="6" width="19" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 9v.01M18 15v.01"/>',
+  reloj: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
 };
 const icono = (nombre) => `<svg class="icono" viewBox="0 0 24 24" aria-hidden="true">${ICONOS[nombre] ?? ""}</svg>`;
 
@@ -194,8 +197,11 @@ async function intentar(accion) {
 
 async function cargarDatos() {
   const rutas = esMecanico()
-    ? { trabajos: "/mecanico/trabajos", perfil: "/mecanico/perfil", reportes: "/mecanico/reportes" }
-    : { clientes: "/clientes", vehiculos: "/vehiculos", mecanicos: "/mecanicos", repuestos: "/repuestos", ordenes: "/ordenes" };
+    ? { trabajos: "/mecanico/trabajos", perfil: "/mecanico/perfil", reportes: "/mecanico/reportes", almacen: "/mecanico/repuestos" }
+    : {
+        clientes: "/clientes", vehiculos: "/vehiculos", mecanicos: "/mecanicos", repuestos: "/repuestos", ordenes: "/ordenes",
+        notificaciones: "/notificaciones", peticiones: "/peticiones", reportesTaller: "/reportes", cobros: "/cobros",
+      };
   if (estado.yo.rol === "administrador") rutas.usuarios = "/usuarios";
   const respuestas = await Promise.all(Object.values(rutas).map((ruta) => api(ruta)));
   estado.datos = Object.fromEntries(Object.keys(rutas).map((clave, i) => [clave, respuestas[i]]));
@@ -398,6 +404,7 @@ const MODULOS = {
   },
   vehiculos: {
     ruta: "/vehiculos", singular: "vehículo",
+    accionExtra: { icono: "reloj", etiqueta: "Historial del vehículo", hacer: (v) => abrirHistorialVehiculo(v) },
     columnas: [
       { titulo: "Placa", valor: (v) => `<span class="placa">${esc(v.placa)}</span>` },
       { titulo: "Vehículo", valor: (v) => `<div class="celda-doble"><strong>${esc(v.marca)} ${esc(v.modelo)}</strong><span>Año ${v.anio}</span></div>` },
@@ -447,6 +454,7 @@ const MODULOS = {
   },
   repuestos: {
     ruta: "/repuestos", singular: "repuesto",
+    accionExtra: { icono: "enviar", etiqueta: "Enviar a un proyecto", hacer: (r) => enviarMaterial(r) },
     columnas: [
       { titulo: "Repuesto", valor: (r) => `<strong>${esc(r.nombre)}</strong>` },
       { titulo: "Precio", clase: "numero", valor: (r) => dinero(r.precio) },
@@ -513,6 +521,7 @@ function pintarModulo(clave) {
           <tr>
             ${modulo.columnas.map((c) => `<td class="${c.clase ?? ""}">${c.valor(item)}</td>`).join("")}
             <td class="acciones-fila">
+              ${modulo.accionExtra ? `<button type="button" class="boton boton-icono" data-extra="${item.id}" aria-label="${esc(modulo.accionExtra.etiqueta)}" title="${esc(modulo.accionExtra.etiqueta)}">${icono(modulo.accionExtra.icono)}</button>` : ""}
               ${modulo.sinEditar ? "" : `<button type="button" class="boton boton-icono" data-editar="${item.id}" aria-label="Editar">${icono("editar")}</button>`}
               <button type="button" class="boton boton-icono peligro" data-eliminar="${item.id}" aria-label="Eliminar">${icono("borrar")}</button>
             </td>
@@ -529,6 +538,9 @@ function pintarModulo(clave) {
   );
   $("#vista").querySelectorAll("[data-eliminar]").forEach((boton) =>
     boton.addEventListener("click", () => eliminarRegistro(clave, porId(estado.datos[clave], Number(boton.dataset.eliminar))))
+  );
+  $("#vista").querySelectorAll("[data-extra]").forEach((boton) =>
+    boton.addEventListener("click", () => modulo.accionExtra.hacer(porId(estado.datos[clave], Number(boton.dataset.extra))))
   );
 }
 
@@ -666,7 +678,8 @@ function camposOrden(orden) {
     },
     { nombre: "fecha_ingreso", etiqueta: "Fecha de ingreso", tipo: "date", requerido: true, max: hoy(), porDefecto: hoy() },
     { nombre: "mano_obra", etiqueta: "Mano de obra (L)", tipo: "number", min: 0, paso: 0.01, porDefecto: 0 },
-    { nombre: "diagnostico", etiqueta: "Diagnóstico", tipo: "textarea", maxlength: 300, completo: true },
+    { nombre: "diagnostico", etiqueta: "Problema", tipo: "textarea", maxlength: 300, completo: true, ayuda: "Qué le pasa al vehículo y qué hay que revisar" },
+    { nombre: "indicaciones", etiqueta: "Indicaciones del cliente", tipo: "textarea", maxlength: 300, completo: true, ayuda: "Datos relevantes del cliente; los mecánicos también los ven" },
   ];
 }
 
@@ -676,8 +689,8 @@ function formularioOrden(orden) {
     return;
   }
   abrirFormulario({
-    titulo: orden ? `Editar orden #${orden.id}` : "Nueva orden de servicio",
-    subtitulo: orden ? "" : "La orden empieza en estado «Recibido»",
+    titulo: orden ? `Editar proyecto #${orden.id}` : "Nuevo proyecto de trabajo",
+    subtitulo: orden ? "" : "El proyecto empieza en estado «Recibido» y le llega al líder y a su equipo",
     campos: camposOrden(orden),
     valores: orden ?? {},
     textoBoton: orden ? "Guardar cambios" : "Crear orden",
@@ -686,7 +699,7 @@ function formularioOrden(orden) {
       // Si el líder quedó marcado también en el equipo, se quita de ahí
       datos.equipo = datos.equipo.filter((id) => id !== datos.mecanico_id);
       const guardada = await api(orden ? `/ordenes/${orden.id}` : "/ordenes", { metodo: orden ? "PUT" : "POST", datos });
-      aviso(orden ? "Orden actualizada" : `Orden #${guardada.id} creada`);
+      aviso(orden ? "Proyecto actualizado" : `Proyecto #${guardada.id} creado`);
     },
   });
 
@@ -704,15 +717,16 @@ function formularioOrden(orden) {
 }
 
 /** Pide la calificación del trabajo antes de entregar. Resuelve con la clave elegida o "". */
-function pedirCalificacion(orden, vehiculo, mecanico) {
+function pedirCalificacion(orden, vehiculo, mecanico, cobro) {
   const categoria = vehiculo?.categoria ?? "estandar";
   return preguntar(`
     <form method="dialog" id="formulario-calificacion">
       <div class="dialogo-encabezado"><div>
         <h2>¿Cómo quedó el trabajo?</h2>
-        <p>Al entregar la orden #${orden.id} se califica el trabajo de ${esc(mecanico?.nombre ?? "el mecánico")}, el líder. Eso suma o resta sus créditos (auto ${CATEGORIAS[categoria].nombre.toLowerCase()}).${orden.equipo.length
+        <p>Al entregar el proyecto #${orden.id} se califica el trabajo de ${esc(mecanico?.nombre ?? "el mecánico")}, el líder. Eso suma o resta sus créditos (auto ${CATEGORIAS[categoria].nombre.toLowerCase()}).${orden.equipo.length
           ? ` Cada uno de los ${orden.equipo.length} del equipo recibe la mitad de esto y la otra mitad según lo calificó su líder.`
           : ""}</p>
+        ${cobro?.saldo > 0 ? `<p class="aviso-saldo">${icono("alerta")} El cliente todavía debe ${dinero(cobro.saldo)}. Puede entregar igual, pero cóbrelo en «Cobros».</p>` : ""}
       </div></div>
       <div class="dialogo-cuerpo"><div class="opciones-calificacion">
         ${CALIFICACIONES.map((c, i) => {
@@ -740,10 +754,10 @@ confirmacion.addEventListener("click", (evento) => {
 
 async function abrirOrden(id) {
   const resultado = await intentar(() =>
-    Promise.all([api(`/ordenes/${id}`), api(`/ordenes/${id}/repuestos`), api(`/ordenes/${id}/total`)])
+    Promise.all([api(`/ordenes/${id}`), api(`/ordenes/${id}/repuestos`), api(`/ordenes/${id}/total`), api(`/ordenes/${id}/cobro`)])
   );
   if (!resultado) return;
-  const [orden, lineas, total] = resultado;
+  const [orden, lineas, total, cobro] = resultado;
   const vehiculo = porId(estado.datos.vehiculos, orden.vehiculo_id);
   const cliente = vehiculo && porId(estado.datos.clientes, vehiculo.cliente_id);
   const mecanico = porId(estado.datos.mecanicos, orden.mecanico_id);
@@ -754,7 +768,7 @@ async function abrirOrden(id) {
 
   abrirDialogo(`
     ${encabezadoDialogo(
-      `Orden #${orden.id} <span class="placa">${esc(vehiculo?.placa ?? "—")}</span>`,
+      `Proyecto #${orden.id} <span class="placa">${esc(vehiculo?.placa ?? "—")}</span>`,
       `Ingresó el ${fecha(orden.fecha_ingreso)} · ${insigniaEstado(orden.estado)}`
     )}
     <div class="dialogo-cuerpo">
@@ -773,7 +787,8 @@ async function abrirOrden(id) {
               return `<span class="chip-equipo"><span class="avatar">${esc(iniciales(m?.nombre))}</span>${esc(m?.nombre ?? "—")}</span>`;
             }).join("")}</div>`
           : `<span>Solo el líder</span>`}</div>
-        <div class="dato completo"><small>Diagnóstico</small><strong>${esc(orden.diagnostico || "Sin diagnóstico")}</strong></div>
+        <div class="dato completo"><small>Problema</small><strong>${esc(orden.diagnostico || "Sin descripción")}</strong></div>
+        ${orden.indicaciones ? `<div class="dato completo"><small>Indicaciones del cliente</small><strong>${esc(orden.indicaciones)}</strong></div>` : ""}
         ${orden.calificacion ? `<div class="dato completo"><small>Calificación del trabajo</small>${insigniaCalificacion(orden.calificacion)}</div>` : ""}
       </div>
 
@@ -801,23 +816,27 @@ async function abrirOrden(id) {
         <div><span>Mano de obra</span><span>${dinero(total.mano_obra)}</span></div>
         <div><span>Repuestos</span><span>${dinero(total.repuestos)}</span></div>
         <div class="total"><span>Total</span><span>${dinero(total.total)}</span></div>
+        <div><span>Pagado</span><span>${dinero(cobro.pagado)}</span></div>
+        <div class="saldo"><span>Saldo</span><span>${dinero(cobro.saldo)} ${insigniaPago(cobro.estado_pago)}</span></div>
+        ${cobro.saldo > 0 ? `<button type="button" class="boton boton-secundario" id="cobrar-orden">${icono("dinero")} Registrar pago</button>` : ""}
       </div>
     </div>
     <div class="dialogo-pie">
       ${editable ? `
         <button type="button" class="boton boton-peligro separar" id="eliminar-orden">${icono("borrar")} Eliminar</button>
-        <button type="button" class="boton boton-secundario" id="editar-orden">${icono("editar")} Editar</button>` : `<span class="texto-tenue separar">${orden.estado === "entregado" ? "Orden cerrada" : "Ya no se puede modificar"}</span>`}
+        <button type="button" class="boton boton-secundario" id="editar-orden">${icono("editar")} Editar</button>` : `<span class="texto-tenue separar">${orden.estado === "entregado" ? "Proyecto cerrado" : "Ya no se puede modificar"}</span>`}
       ${siguiente ? `<button type="button" class="boton boton-primario" id="avanzar-orden">${siguiente.clave === "entregado" ? "Calificar y entregar" : `Pasar a «${siguiente.nombre}»`} ${icono("flecha")}</button>` : ""}
     </div>`, (raiz) => {
+    $("#cobrar-orden", raiz)?.addEventListener("click", () => registrarPago(cobro));
     $("#avanzar-orden", raiz)?.addEventListener("click", async () => {
       let datos;
       if (siguiente.clave === "entregado") {
-        const calificacion = await pedirCalificacion(orden, vehiculo, mecanico);
+        const calificacion = await pedirCalificacion(orden, vehiculo, mecanico, cobro);
         if (!calificacion) return;
         datos = { calificacion };
       }
       if (await intentar(() => api(`/ordenes/${id}/avanzar`, { metodo: "POST", datos }))) {
-        aviso(siguiente.clave === "entregado" ? `Orden #${id} entregada y calificada` : `Orden #${id}: ${siguiente.nombre}`);
+        aviso(siguiente.clave === "entregado" ? `Proyecto #${id} entregado y calificado` : `Proyecto #${id}: ${siguiente.nombre}`);
         await refrescar();
         abrirOrden(id);
       }
@@ -825,12 +844,12 @@ async function abrirOrden(id) {
     $("#editar-orden", raiz)?.addEventListener("click", () => formularioOrden(orden));
     $("#eliminar-orden", raiz)?.addEventListener("click", async () => {
       const seguro = await confirmar({
-        titulo: `¿Eliminar la orden #${id}?`,
+        titulo: `¿Eliminar el proyecto #${id}?`,
         texto: "Los repuestos que usaba vuelven al inventario. Esta acción no se puede deshacer.",
       });
       if (seguro && (await intentar(() => api(`/ordenes/${id}`, { metodo: "DELETE" })))) {
         dialogo.close();
-        aviso("Orden eliminada");
+        aviso("Proyecto eliminado");
         await refrescar();
       }
     });
@@ -854,6 +873,394 @@ async function abrirOrden(id) {
       }
     });
   });
+}
+
+// ===================== Recepción: cobros =====================
+const ESTADOS_PAGO = {
+  pendiente: { nombre: "Sin pagar", clase: "insignia-peligro" },
+  parcial: { nombre: "Pago parcial", clase: "insignia-baja" },
+  pagado: { nombre: "Pagado", clase: "insignia-ok" },
+};
+const METODOS_PAGO = { efectivo: "Efectivo", tarjeta: "Tarjeta", transferencia: "Transferencia" };
+const insigniaPago = (clave) => `<span class="insignia ${ESTADOS_PAGO[clave].clase}">${ESTADOS_PAGO[clave].nombre}</span>`;
+
+function registrarPago(cobro) {
+  abrirFormulario({
+    titulo: `Cobrar proyecto #${cobro.id}`,
+    subtitulo: `${cobro.cliente} · total ${dinero(cobro.total)} · saldo ${dinero(cobro.saldo)}`,
+    campos: [
+      { nombre: "monto", etiqueta: "Monto (L)", tipo: "number", requerido: true, min: 0.01, max: cobro.saldo, paso: 0.01, porDefecto: cobro.saldo, ayuda: "Puede ser un pago parcial o un anticipo" },
+      {
+        nombre: "metodo", etiqueta: "Forma de pago", tipo: "select", numerico: false, requerido: true, textoVacio: "",
+        opciones: Object.entries(METODOS_PAGO).map(([valor, texto]) => ({ valor, texto })), porDefecto: "efectivo",
+      },
+      { nombre: "referencia", etiqueta: "Referencia", maxlength: 60, completo: true, ayuda: "Número de voucher o transferencia (opcional)" },
+    ],
+    textoBoton: "Registrar pago",
+    enviar: async (datos) => {
+      const resultado = await api(`/ordenes/${cobro.id}/pagos`, { metodo: "POST", datos });
+      aviso(resultado.saldo > 0 ? `Pago registrado. Queda ${dinero(resultado.saldo)}` : "Proyecto pagado por completo");
+    },
+  });
+}
+
+async function verPagos(ordenId) {
+  const cobro = await intentar(() => api(`/ordenes/${ordenId}/cobro`));
+  if (!cobro) return;
+  const puedeAnular = estado.yo.rol === "administrador";
+  abrirDialogo(`
+    ${encabezadoDialogo(`Pagos del proyecto #${cobro.id}`, `${esc(cobro.cliente)} · <span class="placa">${esc(cobro.placa)}</span>`)}
+    <div class="dialogo-cuerpo">
+      ${cobro.pagos.length ? `<div class="tabla-repuestos tabla-contenedor"><table>
+        <thead><tr><th>Fecha</th><th>Forma</th><th>Referencia</th><th>Registró</th><th class="numero">Monto</th>${puedeAnular ? "<th></th>" : ""}</tr></thead>
+        <tbody>${cobro.pagos.map((p) => `<tr><td>${fechaHora(p.fecha)}</td><td>${esc(METODOS_PAGO[p.metodo])}</td>
+          <td class="mono">${esc(p.referencia || "—")}</td><td>${esc(p.registrado_por || "—")}</td><td class="numero">${dinero(p.monto)}</td>
+          ${puedeAnular ? `<td class="acciones-fila"><button type="button" class="boton boton-icono peligro" data-anular="${p.id}" aria-label="Anular pago">${icono("borrar")}</button></td>` : ""}</tr>`).join("")}
+        </tbody></table></div>` : `<p class="vacio-chico" style="padding-left:0">Todavía no hay pagos.</p>`}
+      <div class="totales">
+        <div><span>Total</span><span>${dinero(cobro.total)}</span></div>
+        <div><span>Pagado</span><span>${dinero(cobro.pagado)}</span></div>
+        <div class="total"><span>Saldo</span><span>${dinero(cobro.saldo)}</span></div>
+      </div>
+    </div>
+    <div class="dialogo-pie">
+      <button type="button" class="boton boton-secundario separar" data-cerrar>Cerrar</button>
+      ${cobro.saldo > 0 ? `<button type="button" class="boton boton-primario" id="cobrar-desde-pagos">${icono("dinero")} Registrar pago</button>` : ""}
+    </div>`, (raiz) => {
+    $("#cobrar-desde-pagos", raiz)?.addEventListener("click", () => registrarPago(cobro));
+    raiz.querySelectorAll("[data-anular]").forEach((boton) =>
+      boton.addEventListener("click", async () => {
+        const seguro = await confirmar({ titulo: "¿Anular este pago?", texto: "El monto vuelve al saldo del proyecto.", boton: "Anular" });
+        if (seguro && (await intentar(() => api(`/pagos/${boton.dataset.anular}`, { metodo: "DELETE" })))) {
+          aviso("Pago anulado");
+          await refrescar();
+          verPagos(ordenId);
+        }
+      })
+    );
+  });
+}
+
+function pintarCobros() {
+  const { cobros } = estado.datos;
+  const filtro = estado.filtroCobros ?? "saldo";
+  const conSaldo = cobros.filter((c) => c.saldo > 0);
+  const visibles = filtro === "saldo" ? conSaldo : filtro === "pagado" ? cobros.filter((c) => c.estado_pago === "pagado") : cobros;
+  const suma = (lista, campo) => lista.reduce((total, c) => total + c[campo], 0);
+
+  $("#vista").innerHTML = `
+    <div class="estadisticas">
+      <div class="panel estadistica alerta"><span class="etiqueta">${icono("dinero")} Por cobrar</span><span class="valor">${dinero(suma(conSaldo, "saldo"))}</span><span class="detalle">${conSaldo.length} proyectos con saldo</span></div>
+      <div class="panel estadistica"><span class="etiqueta">${icono("check")} Cobrado</span><span class="valor">${dinero(suma(cobros, "pagado"))}</span><span class="detalle">en todos los proyectos</span></div>
+      <div class="panel estadistica"><span class="etiqueta">${icono("alerta")} Listos sin pagar</span><span class="valor">${conSaldo.filter((c) => c.estado === "listo").length}</span><span class="detalle">el cliente debe pagar al retirar</span></div>
+      <div class="panel estadistica"><span class="etiqueta">${icono("ordenes")} Entregados con saldo</span><span class="valor">${conSaldo.filter((c) => c.estado === "entregado").length}</span><span class="detalle">cuentas por cobrar</span></div>
+    </div>
+    <section class="panel">
+      <div class="barra-herramientas">
+        <div class="pestanas-filtro" role="tablist">
+          ${[["saldo", "Con saldo"], ["pagado", "Pagados"], ["todos", "Todos"]].map(([clave, texto]) =>
+            `<button type="button" class="pestana-filtro ${clave === filtro ? "activa" : ""}" data-filtro="${clave}">${texto}</button>`).join("")}
+        </div>
+        <span class="conteo">${visibles.length} proyectos</span>
+      </div>
+      ${visibles.length ? `<div class="tabla-contenedor"><table>
+        <thead><tr><th>Proyecto</th><th>Cliente</th><th>Estado</th><th class="numero">Total</th><th class="numero">Pagado</th><th class="numero">Saldo</th><th>Pago</th><th></th></tr></thead>
+        <tbody>${visibles.map((c) => `<tr>
+          <td><div class="celda-doble"><strong>#${c.id} <span class="placa">${esc(c.placa)}</span></strong><span>${esc(c.marca)} ${esc(c.modelo)}</span></div></td>
+          <td><div class="celda-doble"><strong>${esc(c.cliente)}</strong><span class="mono">${esc(c.telefono)}</span></div></td>
+          <td>${insigniaEstado(c.estado)}</td>
+          <td class="numero">${dinero(c.total)}</td><td class="numero">${dinero(c.pagado)}</td><td class="numero"><strong>${dinero(c.saldo)}</strong></td>
+          <td>${insigniaPago(c.estado_pago)}</td>
+          <td class="acciones-fila">
+            <button type="button" class="boton boton-icono" data-pagos="${c.id}" aria-label="Ver pagos" title="Ver pagos">${icono("reloj")}</button>
+            ${c.saldo > 0 ? `<button type="button" class="boton boton-secundario boton-chico" data-cobrar="${c.id}">${icono("dinero")} Cobrar</button>` : ""}
+          </td></tr>`).join("")}
+        </tbody></table></div>` : `<div class="vacio">${icono("dinero")}<strong>Nada por aquí</strong><span>No hay proyectos en este filtro.</span></div>`}
+    </section>`;
+
+  $("#vista").querySelectorAll("[data-filtro]").forEach((boton) =>
+    boton.addEventListener("click", () => { estado.filtroCobros = boton.dataset.filtro; pintarCobros(); })
+  );
+  $("#vista").querySelectorAll("[data-cobrar]").forEach((boton) =>
+    boton.addEventListener("click", () => registrarPago(porId(cobros, Number(boton.dataset.cobrar))))
+  );
+  $("#vista").querySelectorAll("[data-pagos]").forEach((boton) =>
+    boton.addEventListener("click", () => verPagos(Number(boton.dataset.pagos)))
+  );
+}
+
+// ===================== Recepción: almacén e historial de vehículos =====================
+function enviarMaterial(repuesto) {
+  const activos = estado.datos.ordenes.filter((o) => ESTADOS_EDITABLES.includes(o.estado));
+  if (!activos.length) {
+    aviso("No hay proyectos activos a los que enviar material", "error");
+    return;
+  }
+  abrirFormulario({
+    titulo: `Enviar ${repuesto.nombre}`,
+    subtitulo: `Quedan ${repuesto.existencia} en el almacén · se suma al costo del proyecto`,
+    campos: [
+      {
+        nombre: "orden_id", etiqueta: "Proyecto", tipo: "select", requerido: true, completo: true,
+        opciones: activos.map((o) => {
+          const v = porId(estado.datos.vehiculos, o.vehiculo_id);
+          const lider = porId(estado.datos.mecanicos, o.mecanico_id);
+          return { valor: o.id, texto: `#${o.id} · ${v?.placa ?? ""} ${v?.marca ?? ""} ${v?.modelo ?? ""} — líder ${lider?.nombre ?? ""}` };
+        }),
+      },
+      { nombre: "cantidad", etiqueta: "Cantidad", tipo: "number", requerido: true, min: 1, max: repuesto.existencia, paso: 1, porDefecto: 1 },
+    ],
+    textoBoton: "Enviar al equipo",
+    enviar: async (datos) => {
+      await api(`/ordenes/${datos.orden_id}/repuestos`, { metodo: "POST", datos: { repuesto_id: repuesto.id, cantidad: datos.cantidad } });
+      aviso(`Material enviado al proyecto #${datos.orden_id}`);
+    },
+  });
+}
+
+async function abrirHistorialVehiculo(vehiculo) {
+  const historial = await intentar(() => api(`/vehiculos/${vehiculo.id}/historial`));
+  if (!historial) return;
+  const dueno = porId(estado.datos.clientes, vehiculo.cliente_id);
+  const gastado = historial.reduce((total, p) => total + p.total, 0);
+  const debe = historial.reduce((total, p) => total + Math.max(0, p.total - p.pagado), 0);
+  abrirDialogo(`
+    ${encabezadoDialogo(
+      `<span class="placa">${esc(vehiculo.placa)}</span> ${esc(vehiculo.marca)} ${esc(vehiculo.modelo)} ${vehiculo.anio}`,
+      `${esc(dueno?.nombre ?? "—")} · ${insigniaCategoria(vehiculo.categoria)}`
+    )}
+    <div class="dialogo-cuerpo">
+      <div class="leyenda leyenda-tres">
+        <div><strong>${historial.length}</strong><span>Proyectos</span></div>
+        <div><strong>${dinero(gastado)}</strong><span>Total en el taller</span></div>
+        <div><strong class="${debe > 0 ? "negativo" : ""}">${dinero(debe)}</strong><span>Saldo pendiente</span></div>
+      </div>
+      <h3 class="seccion-titulo">Historial</h3>
+      ${historial.length ? `<ul class="lista-historial">${historial.map((p) => `
+        <li><button type="button" class="fila-lista" data-proyecto="${p.id}">
+          <span class="principal"><strong>#${p.id} · ${esc(p.diagnostico || "Sin descripción")}</strong>
+            <span>${fecha(p.fecha_ingreso)} · líder ${esc(p.lider)}${p.calificacion ? ` · ${esc(nombreCalificacion(p.calificacion))}` : ""}</span></span>
+          <span class="historial-montos"><strong>${dinero(p.total)}</strong>${p.total - p.pagado > 0 ? `<span class="negativo">debe ${dinero(p.total - p.pagado)}</span>` : `<span class="positivo">pagado</span>`}</span>
+          ${insigniaEstado(p.estado)}
+        </button></li>`).join("")}</ul>` : `<p class="vacio-chico" style="padding-left:0">Este vehículo todavía no ha tenido proyectos.</p>`}
+    </div>
+    <div class="dialogo-pie"><button type="button" class="boton boton-secundario" data-cerrar>Cerrar</button></div>`, (raiz) => {
+    raiz.querySelectorAll("[data-proyecto]").forEach((boton) =>
+      boton.addEventListener("click", () => abrirOrden(Number(boton.dataset.proyecto)))
+    );
+  });
+}
+
+// ===================== Recepción: bandeja =====================
+const PESTANAS_BANDEJA = [
+  { clave: "peticiones", titulo: "Peticiones de material", cuenta: () => estado.datos.peticiones.filter((p) => p.estado === "pendiente").length },
+  { clave: "reportes", titulo: "Reportes", cuenta: () => estado.datos.reportesTaller.filter((r) => r.estado === "abierto").length },
+  { clave: "avisos", titulo: "Avisos", cuenta: () => estado.datos.notificaciones.filter((n) => !n.leida).length },
+];
+const TIPO_AVISO = { listo: ["Trabajo listo", "insignia-ok"], avance: ["Avance", "insignia-premium"], reporte: ["Reporte", "insignia-peligro"] };
+const pendientesBandeja = () => PESTANAS_BANDEJA.reduce((total, p) => total + p.cuenta(), 0);
+
+function pintarBandeja() {
+  const pestana = estado.pestanaBandeja ?? "peticiones";
+  let contenido = "";
+
+  if (pestana === "peticiones") {
+    const pendientes = estado.datos.peticiones.filter((p) => p.estado === "pendiente");
+    const respondidas = estado.datos.peticiones.filter((p) => p.estado !== "pendiente").slice(0, 10);
+    contenido = `
+      ${pendientes.length ? `<div class="rejilla-tarjetas">${pendientes.map((p) => `
+        <article class="panel tarjeta-bandeja">
+          <div class="arriba"><span class="placa">${esc(p.placa)}</span><span class="numero-orden">Proyecto #${p.orden_id}</span></div>
+          <strong class="pide">${esc(p.repuesto)} × ${p.cantidad}</strong>
+          <span class="${p.existencia >= p.cantidad ? "texto-tenue" : "negativo"}">Quedan ${p.existencia} en el almacén</span>
+          ${p.motivo ? `<p>«${esc(p.motivo)}»</p>` : ""}
+          <span class="texto-tenue de-quien">${esc(p.mecanico)} · ${fechaHora(p.fecha)}</span>
+          <div class="acciones-tarjeta">
+            <button type="button" class="boton boton-secundario boton-chico" data-rechazar="${p.id}">Rechazar</button>
+            <button type="button" class="boton boton-primario boton-chico" data-enviar="${p.id}" ${p.existencia < p.cantidad ? "disabled" : ""}>${icono("enviar")} Enviar material</button>
+          </div>
+        </article>`).join("")}</div>` : `<div class="panel vacio">${icono("check")}<strong>Sin peticiones pendientes</strong><span>Cuando un mecánico pida material aparecerá aquí.</span></div>`}
+      ${respondidas.length ? `<section class="panel"><div class="panel-encabezado"><h2>Respondidas</h2></div><ul class="lista">${respondidas.map((p) => `
+        <li><div class="fila-lista"><span class="principal"><strong>${esc(p.repuesto)} × ${p.cantidad} · proyecto #${p.orden_id}</strong>
+          <span>${esc(p.mecanico)}${p.respuesta ? ` · «${esc(p.respuesta)}»` : ""}</span></span>
+          <span class="insignia ${p.estado === "enviada" ? "insignia-ok" : "insignia-peligro"}">${p.estado === "enviada" ? "Enviada" : "Rechazada"}</span></div></li>`).join("")}</ul></section>` : ""}`;
+  } else if (pestana === "reportes") {
+    const verTodos = estado.reportesTodos;
+    const lista = estado.datos.reportesTaller.filter((r) => verTodos || r.estado === "abierto");
+    contenido = `
+      <div class="filtros-ordenes"><label class="campo-check"><input type="checkbox" id="ver-resueltos" ${verTodos ? "checked" : ""} /> <span>Mostrar también los resueltos</span></label></div>
+      ${lista.length ? `<div class="rejilla-tarjetas">${lista.map((r) => `
+        <article class="panel tarjeta-bandeja ${r.tipo === "desempeno" ? "de-lider" : ""}">
+          <div class="arriba">
+            <span class="insignia ${r.tipo === "desempeno" ? "insignia-lujo" : "insignia-neutra"}">${r.tipo === "desempeno" ? `${icono("estrella")}Del líder` : esc(TIPOS_REPORTE[r.tipo])}</span>
+            <span class="insignia ${r.estado === "resuelto" ? "insignia-ok" : "insignia-baja"}">${r.estado === "resuelto" ? "Resuelto" : "Abierto"}</span>
+          </div>
+          <strong>${esc(r.titulo)}</strong>
+          ${r.sobre_mecanico ? `<span class="sobre">Sobre <strong>${esc(r.sobre_mecanico)}</strong></span>` : ""}
+          <p>${esc(r.descripcion)}</p>
+          <span class="texto-tenue de-quien">${esc(r.mecanico)} · ${fechaHora(r.fecha)}${r.orden_id ? ` · proyecto #${r.orden_id}` : ""}</span>
+          ${r.estado === "abierto" ? `<div class="acciones-tarjeta"><button type="button" class="boton boton-secundario boton-chico" data-resolver="${r.id}">${icono("check")} Marcar resuelto</button></div>` : ""}
+        </article>`).join("")}</div>` : `<div class="panel vacio">${icono("reporte")}<strong>Sin reportes abiertos</strong><span>Los reportes de los mecánicos y de los líderes llegan aquí.</span></div>`}`;
+  } else {
+    const avisos = estado.datos.notificaciones;
+    contenido = `
+      <section class="panel">
+        <div class="panel-encabezado"><h2>Avisos de los mecánicos</h2>
+          ${avisos.some((n) => !n.leida) ? `<button type="button" class="boton boton-secundario boton-chico" id="leer-todas">Marcar todo como leído</button>` : ""}</div>
+        ${avisos.length ? `<ul class="lista">${avisos.map((n) => `
+          <li class="${n.leida ? "" : "no-leida"}"><div class="fila-lista">
+            <span class="insignia ${TIPO_AVISO[n.tipo][1]}">${TIPO_AVISO[n.tipo][0]}</span>
+            <span class="principal"><strong>${esc(n.mensaje)}</strong><span>${esc(n.mecanico ?? "—")} · ${fechaHora(n.fecha)}</span></span>
+            ${n.orden_id ? `<button type="button" class="boton boton-icono" data-ver-proyecto="${n.orden_id}" aria-label="Ver proyecto" title="Ver proyecto">${icono("ordenes")}</button>` : ""}
+            ${n.leida ? "" : `<button type="button" class="boton boton-icono" data-leida="${n.id}" aria-label="Marcar como leído" title="Marcar como leído">${icono("check")}</button>`}
+          </div></li>`).join("")}</ul>` : `<p class="vacio-chico">Todavía no hay avisos.</p>`}
+      </section>`;
+  }
+
+  $("#vista").innerHTML = `
+    <div class="pestanas-filtro pestanas-bandeja" role="tablist">
+      ${PESTANAS_BANDEJA.map((p) => {
+        const n = p.cuenta();
+        return `<button type="button" class="pestana-filtro ${p.clave === pestana ? "activa" : ""}" data-pestana="${p.clave}">${p.titulo}${n ? ` <span class="contador-pestana">${n}</span>` : ""}</button>`;
+      }).join("")}
+    </div>
+    ${contenido}`;
+
+  const vista = $("#vista");
+  vista.querySelectorAll("[data-pestana]").forEach((b) => b.addEventListener("click", () => { estado.pestanaBandeja = b.dataset.pestana; pintarBandeja(); }));
+  $("#ver-resueltos")?.addEventListener("change", (e) => { estado.reportesTodos = e.target.checked; pintarBandeja(); });
+  const accion = (selector, hacer) => vista.querySelectorAll(selector).forEach((b) => b.addEventListener("click", () => hacer(b)));
+  accion("[data-enviar]", async (b) => {
+    if (await intentar(() => api(`/peticiones/${b.dataset.enviar}/enviar`, { metodo: "POST" }))) {
+      aviso("Material enviado al equipo");
+      await refrescar();
+    }
+  });
+  accion("[data-rechazar]", async (b) => {
+    const respuesta = await pedirTexto("Rechazar la petición", "Explique al mecánico por qué (lo verá en su trabajo).", "Rechazar");
+    if (respuesta && (await intentar(() => api(`/peticiones/${b.dataset.rechazar}/rechazar`, { metodo: "POST", datos: { respuesta } })))) {
+      aviso("Petición rechazada");
+      await refrescar();
+    }
+  });
+  accion("[data-resolver]", async (b) => {
+    if (await intentar(() => api(`/reportes/${b.dataset.resolver}/resolver`, { metodo: "POST" }))) {
+      aviso("Reporte resuelto");
+      await refrescar();
+    }
+  });
+  accion("[data-leida]", async (b) => {
+    if (await intentar(() => api(`/notificaciones/${b.dataset.leida}/leida`, { metodo: "POST" }))) await refrescar();
+  });
+  accion("[data-ver-proyecto]", (b) => abrirOrden(Number(b.dataset.verProyecto)));
+  $("#leer-todas")?.addEventListener("click", async () => {
+    if (await intentar(() => api("/notificaciones/leer-todas", { metodo: "POST" }))) await refrescar();
+  });
+}
+
+/** Pide un texto corto en el diálogo chico. Resuelve con el texto o "" si se canceló. */
+async function pedirTexto(titulo, texto, boton) {
+  const respuesta = await preguntar(`
+    <div class="dialogo-encabezado"><div><h2>${esc(titulo)}</h2><p>${esc(texto)}</p></div></div>
+    <div class="dialogo-cuerpo"><div class="campo"><textarea id="texto-pedido" maxlength="200" aria-label="${esc(titulo)}"></textarea></div></div>
+    <div class="dialogo-pie">
+      <button type="button" class="boton boton-secundario" data-respuesta="">Cancelar</button>
+      <button type="button" class="boton boton-primario" id="aceptar-texto">${esc(boton)}</button>
+    </div>`);
+  return respuesta;
+}
+
+// El botón del diálogo de texto devuelve lo escrito (mínimo 3 letras)
+confirmacion.addEventListener("click", (evento) => {
+  if (evento.target.closest("#aceptar-texto")) {
+    const texto = $("#texto-pedido", confirmacion).value.trim();
+    if (texto.length < 3) {
+      aviso("Escriba al menos 3 letras", "error");
+      return;
+    }
+    confirmacion.close(texto);
+  }
+});
+
+// ===================== Recepción: puntuaciones =====================
+function pintarPuntuaciones() {
+  const { mecanicos, ordenes } = estado.datos;
+  const porCalificar = ordenes.filter((o) => o.estado === "listo");
+  const ranking = mecanicos.filter((m) => m.activo).sort((a, b) => b.creditos - a.creditos);
+  const participa = (m, o) => o.mecanico_id === m.id || o.equipo.includes(m.id);
+
+  $("#vista").innerHTML = `
+    <div class="rejilla-resumen">
+      <section class="panel">
+        <div class="panel-encabezado"><h2>Ranking de mecánicos</h2><span class="conteo">por créditos</span></div>
+        <div class="tabla-contenedor"><table>
+          <thead><tr><th>#</th><th>Mecánico</th><th>Nivel</th><th class="numero">Créditos</th><th class="numero">Entregados</th><th></th></tr></thead>
+          <tbody>${ranking.map((m, i) => `<tr>
+            <td class="numero"><strong>${i + 1}</strong></td>
+            <td><div class="mecanico-mini"><span class="avatar">${esc(iniciales(m.nombre))}</span><div class="celda-doble"><strong>${esc(m.nombre)}</strong><span>${esc(m.especialidad || "Sin especialidad")}</span></div></div></td>
+            <td>${insigniaNivel(m.creditos)}</td>
+            <td class="numero"><strong>${m.creditos}</strong></td>
+            <td class="numero">${ordenes.filter((o) => o.estado === "entregado" && participa(m, o)).length}</td>
+            <td class="acciones-fila">
+              <button type="button" class="boton boton-icono" data-historial="${m.id}" aria-label="Historial de créditos" title="Historial de créditos">${icono("reloj")}</button>
+              <button type="button" class="boton boton-secundario boton-chico" data-ajustar="${m.id}">${icono("estrella")} Ajustar</button>
+            </td></tr>`).join("")}
+          </tbody></table></div>
+      </section>
+      <div class="columna">
+        <section class="panel">
+          <div class="panel-encabezado"><h2>Listos para calificar</h2><span class="conteo">${porCalificar.length}</span></div>
+          ${porCalificar.length ? `<ul class="lista">${porCalificar.map((o) => {
+            const v = porId(estado.datos.vehiculos, o.vehiculo_id);
+            const lider = porId(mecanicos, o.mecanico_id);
+            return `<li><button type="button" class="fila-lista" data-calificar="${o.id}">
+              <span class="placa">${esc(v?.placa ?? "—")}</span>
+              <span class="principal"><strong>Proyecto #${o.id}</strong><span>Líder ${esc(lider?.nombre ?? "—")}${o.equipo.length ? ` + ${o.equipo.length}` : ""}</span></span>
+              <span class="insignia insignia-lujo">${icono("estrella")}Calificar</span></button></li>`;
+          }).join("")}</ul>` : `<p class="vacio-chico">No hay proyectos listos esperando calificación.</p>`}
+        </section>
+        <section class="panel panel-cuerpo nota-puntos">
+          <h2>Cómo se puntúa</h2>
+          <p>Al entregar un proyecto, recepción lo califica: el líder gana o pierde esos créditos y su equipo la mitad, más la mitad según su líder. Con <strong>Ajustar</strong> puede subir o bajar créditos a mano por algo puntual (horas extra, una falta), con un motivo que el mecánico verá en su historial.</p>
+        </section>
+      </div>
+    </div>`;
+
+  const vista = $("#vista");
+  vista.querySelectorAll("[data-calificar]").forEach((b) => b.addEventListener("click", () => abrirOrden(Number(b.dataset.calificar))));
+  vista.querySelectorAll("[data-ajustar]").forEach((b) => b.addEventListener("click", () => {
+    const m = porId(mecanicos, Number(b.dataset.ajustar));
+    const proyectos = ordenes.filter((o) => participa(m, o)).sort((a, c) => c.id - a.id);
+    abrirFormulario({
+      titulo: `Ajustar créditos de ${m.nombre}`,
+      subtitulo: `Tiene ${m.creditos} créditos (${m.nivel}). Nunca bajan de 0.`,
+      campos: [
+        { nombre: "puntos", etiqueta: "Puntos", tipo: "number", requerido: true, min: -100, max: 100, paso: 1, ayuda: "Positivo para subir, negativo para bajar (de -100 a 100)" },
+        {
+          nombre: "orden_id", etiqueta: "Proyecto relacionado", tipo: "select", textoVacio: "Ninguno",
+          opciones: proyectos.map((o) => ({ valor: o.id, texto: `#${o.id} · ${porId(estado.datos.vehiculos, o.vehiculo_id)?.placa ?? ""} · ${nombreEstado(o.estado)}` })),
+        },
+        { nombre: "motivo", etiqueta: "Motivo", requerido: true, minlength: 5, maxlength: 200, completo: true, ayuda: "El mecánico lo verá en su historial de créditos" },
+      ],
+      textoBoton: "Aplicar ajuste",
+      enviar: async (datos) => {
+        const resultado = await api(`/mecanicos/${m.id}/creditos`, { metodo: "POST", datos });
+        aviso(`${m.nombre} ahora tiene ${resultado.creditos} créditos`);
+      },
+    });
+  }));
+  vista.querySelectorAll("[data-historial]").forEach((b) => b.addEventListener("click", async () => {
+    const m = porId(mecanicos, Number(b.dataset.historial));
+    const historial = await intentar(() => api(`/mecanicos/${m.id}/creditos`));
+    if (!historial) return;
+    abrirDialogo(`
+      ${encabezadoDialogo(`Créditos de ${esc(m.nombre)}`, `${m.creditos} créditos · ${esc(m.nivel)}`)}
+      <div class="dialogo-cuerpo">${historial.length ? `<ul class="lista lista-bordeada">${historial.map((h) => `
+        <li><div class="fila-lista"><span class="principal"><strong>${esc(h.motivo)}</strong><span>${fechaHora(h.fecha)}</span></span>
+          <strong class="${h.puntos > 0 ? "positivo" : h.puntos < 0 ? "negativo" : "texto-tenue"}">${conSigno(h.puntos)}</strong></div></li>`).join("")}</ul>`
+        : `<p class="vacio-chico">Sin movimientos.</p>`}</div>
+      <div class="dialogo-pie"><button type="button" class="boton boton-secundario" data-cerrar>Cerrar</button></div>`);
+  }));
 }
 
 // ===================== Personal: resumen =====================
@@ -972,6 +1379,30 @@ function pintarTrabajos() {
   );
 }
 
+const ESTADO_PETICION = { pendiente: ["Pendiente", "insignia-baja"], enviada: ["Enviada", "insignia-ok"], rechazada: ["Rechazada", "insignia-peligro"] };
+
+/** Material pedido al almacén para este trabajo, y el formulario para pedir más. */
+function seccionMaterial(t) {
+  const activo = ESTADOS_EDITABLES.includes(t.estado);
+  const lista = t.peticiones.length
+    ? `<ul class="lista-peticiones">${t.peticiones.map((p) => `
+        <li><span class="principal"><strong>${esc(p.repuesto)} × ${p.cantidad}</strong>
+          <span>${esc(p.mecanico)} · ${fechaHora(p.fecha)}${p.respuesta ? ` · «${esc(p.respuesta)}»` : ""}</span></span>
+          <span class="insignia ${ESTADO_PETICION[p.estado][1]}">${ESTADO_PETICION[p.estado][0]}</span></li>`).join("")}</ul>`
+    : `<p class="vacio-chico" style="padding-left:0">No se ha pedido material para este trabajo.</p>`;
+  const formulario = activo ? `
+    <form id="formulario-material" class="pedir-material" novalidate>
+      <div class="campo"><label for="material-repuesto">Repuesto</label>
+        <select id="material-repuesto" required><option value="">Seleccione…</option>
+          ${estado.datos.almacen.map((r) => `<option value="${r.id}">${esc(r.nombre)} · quedan ${r.existencia}</option>`).join("")}</select></div>
+      <div class="campo"><label for="material-cantidad">Cantidad</label><input id="material-cantidad" type="number" min="1" max="50" value="1" required /></div>
+      <div class="campo completo"><label for="material-motivo">Para qué (opcional)</label><input id="material-motivo" maxlength="200" placeholder="Ejemplo: el empaque viejo se rompió" /></div>
+      <p class="mensaje-error completo" id="error-material" aria-live="polite"></p>
+      <button type="submit" class="boton boton-secundario">${icono("enviar")} Pedir al almacén</button>
+    </form>` : "";
+  return `<h3 class="seccion-titulo">Material pedido <span class="conteo">${t.peticiones.length}</span></h3>${lista}${formulario}`;
+}
+
 /** Sección «Equipo» del trabajo. El líder, mientras dura el trabajo, asigna tareas, califica y reporta. */
 function seccionEquipo(t) {
   const dirige = t.puedo_dirigir;
@@ -1053,7 +1484,7 @@ async function abrirTrabajo(id) {
 
   abrirDialogo(`
     ${encabezadoDialogo(
-      `Orden #${trabajo.id} <span class="placa">${esc(trabajo.placa)}</span>`,
+      `Proyecto #${trabajo.id} <span class="placa">${esc(trabajo.placa)}</span>`,
       `Ingresó el ${fecha(trabajo.fecha_ingreso)} · ${insigniaEstado(trabajo.estado)}`
     )}
     <div class="dialogo-cuerpo">
@@ -1063,13 +1494,16 @@ async function abrirTrabajo(id) {
       <div class="datos-orden">
         <div class="dato"><small>Vehículo</small><strong>${esc(trabajo.marca)} ${esc(trabajo.modelo)} ${trabajo.anio}</strong>${insigniaCategoria(trabajo.categoria)}</div>
         <div class="dato"><small>Cliente</small><strong>${esc(trabajo.cliente)}</strong></div>
-        <div class="dato completo"><small>Diagnóstico de recepción</small><strong>${esc(trabajo.diagnostico || "Sin diagnóstico")}</strong></div>
+        <div class="dato completo"><small>Problema</small><strong>${esc(trabajo.diagnostico || "Sin descripción")}</strong></div>
+        ${trabajo.indicaciones ? `<div class="dato completo dato-indicaciones"><small>Indicaciones del cliente</small><strong>${esc(trabajo.indicaciones)}</strong></div>` : ""}
       </div>
 
       <h3 class="seccion-titulo">Repuestos asignados <span class="conteo">${trabajo.repuestos.length}</span></h3>
       ${trabajo.repuestos.length
         ? `<ul class="lista-repuestos">${trabajo.repuestos.map((r) => `<li><span>${esc(r.repuesto)}</span><strong>× ${r.cantidad}</strong></li>`).join("")}</ul>`
         : `<p class="vacio-chico" style="padding-left:0">Recepción todavía no asignó repuestos.</p>`}
+
+      ${seccionMaterial(trabajo)}
 
       ${seccionEquipo(trabajo)}
 
@@ -1088,7 +1522,7 @@ async function abrirTrabajo(id) {
     const mensaje = () => $("#mensaje-recepcion", raiz)?.value.trim() ?? "";
     $("#empezar-trabajo", raiz)?.addEventListener("click", async () => {
       if (await intentar(() => api(`/mecanico/trabajos/${id}/empezar`, { metodo: "POST" }))) {
-        aviso(`Orden #${id}: en reparación`);
+        aviso(`Proyecto #${id}: en reparación`);
         await refrescar();
         abrirTrabajo(id);
       }
@@ -1111,6 +1545,23 @@ async function abrirTrabajo(id) {
       if (await intentar(() => api(`/mecanico/trabajos/${id}/aviso`, { metodo: "POST", datos: { mensaje: texto } }))) {
         aviso("Aviso enviado a recepción");
         $("#mensaje-recepcion", raiz).value = "";
+      }
+    });
+
+    $("#formulario-material", raiz)?.addEventListener("submit", async (evento) => {
+      evento.preventDefault();
+      const formulario = evento.currentTarget;
+      const error = $("#error-material", raiz);
+      error.textContent = "";
+      if (!formularioValido(formulario, error)) return;
+      const datos = {
+        repuesto_id: Number($("#material-repuesto", raiz).value),
+        cantidad: Number($("#material-cantidad", raiz).value),
+        motivo: $("#material-motivo", raiz).value.trim() || null,
+      };
+      if (await intentar(() => api(`/mecanico/trabajos/${id}/peticiones`, { metodo: "POST", datos }))) {
+        aviso("Petición enviada a recepción");
+        abrirTrabajo(id);
       }
     });
 
@@ -1157,7 +1608,7 @@ function camposReporte() {
       opciones: Object.entries(TIPOS_REPORTE).map(([valor, texto]) => ({ valor, texto })),
     },
     {
-      nombre: "orden_id", etiqueta: "Orden relacionada", tipo: "select", textoVacio: "Ninguna",
+      nombre: "orden_id", etiqueta: "Proyecto relacionado", tipo: "select", textoVacio: "Ninguno",
       opciones: activos.map((t) => ({ valor: t.id, texto: `#${t.id} · ${t.placa} ${t.marca} ${t.modelo}` })),
     },
     { nombre: "titulo", etiqueta: "Título", requerido: true, minlength: 3, maxlength: 100, completo: true },
@@ -1188,7 +1639,7 @@ function pintarReportes() {
             </div>
             <strong>${esc(r.titulo)}</strong>
             <p>${esc(r.descripcion)}</p>
-            <span class="texto-tenue">${fechaHora(r.fecha)}${r.orden_id ? ` · Orden #${r.orden_id}` : ""}</span>
+            <span class="texto-tenue">${fechaHora(r.fecha)}${r.orden_id ? ` · Proyecto #${r.orden_id}` : ""}</span>
           </li>`).join("")}</ul>`
           : `<div class="vacio">${icono("reporte")}<strong>Sin reportes</strong><span>Si algo falla en el taller, avise desde aquí.</span></div>`}
       </section>
@@ -1337,12 +1788,18 @@ function pintarPerfil() {
 // ===================== Navegación =====================
 const VISTAS_PERSONAL = {
   resumen: { titulo: "Resumen", subtitulo: "Así está el taller hoy", icono: "resumen", pintar: pintarResumen },
-  ordenes: { titulo: "Órdenes", subtitulo: "Tablero de órdenes de servicio", icono: "ordenes", pintar: pintarOrdenes,
-    boton: "Nueva orden", nuevo: () => formularioOrden(), cuenta: () => ordenesActivas().length },
+  ordenes: { titulo: "Proyectos", subtitulo: "Proyectos de trabajo: vehículo, cliente, problema y equipo", icono: "ordenes", pintar: pintarOrdenes,
+    boton: "Nuevo proyecto", nuevo: () => formularioOrden(), cuenta: () => ordenesActivas().length },
+  bandeja: { titulo: "Bandeja", subtitulo: "Peticiones, reportes y avisos de los mecánicos", icono: "bandeja", pintar: pintarBandeja,
+    cuenta: () => pendientesBandeja() },
+  cobros: { titulo: "Cobros", subtitulo: "Pagos de los clientes y saldos pendientes", icono: "dinero", pintar: pintarCobros,
+    cuenta: () => estado.datos.cobros.filter((c) => c.saldo > 0).length },
+  repuestos: { titulo: "Almacén", subtitulo: "Inventario de repuestos; con «Enviar» se manda material a un proyecto", icono: "repuestos" },
+  puntuaciones: { titulo: "Puntuaciones", subtitulo: "Créditos de los mecánicos y proyectos por calificar", icono: "estrella", pintar: pintarPuntuaciones,
+    cuenta: () => estado.datos.ordenes.filter((o) => o.estado === "listo").length },
+  vehiculos: { titulo: "Vehículos", subtitulo: "Registro de vehículos; con el reloj se ve su historial", icono: "vehiculos" },
   clientes: { titulo: "Clientes", subtitulo: "Personas que traen sus vehículos", icono: "clientes" },
-  vehiculos: { titulo: "Vehículos", subtitulo: "Vehículos registrados, su categoría y sus dueños", icono: "vehiculos" },
   mecanicos: { titulo: "Mecánicos", subtitulo: "Equipo de trabajo, niveles y créditos", icono: "mecanicos" },
-  repuestos: { titulo: "Repuestos", subtitulo: "Inventario y precios", icono: "repuestos" },
   usuarios: { titulo: "Cuentas", subtitulo: "Accesos que entrega la empresa", icono: "usuarios", soloAdministrador: true },
 };
 for (const clave of Object.keys(MODULOS)) {

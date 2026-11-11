@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, status
 
 from database import obtener_conexion
-from modelos import MecanicoEntrada, MecanicoRespuesta, MensajeRespuesta
+from modelos import AjusteCreditos, MecanicoEntrada, MecanicoRespuesta, MensajeRespuesta, MovimientoCredito
 from repositorios import RepositorioMecanico
 from seguridad import solo_personal
 
@@ -32,6 +32,19 @@ def crear_mecanico(datos: MecanicoEntrada):
 def actualizar_mecanico(mecanico_id: int, datos: MecanicoEntrada):
     with obtener_conexion() as con:
         return RepositorioMecanico(con).actualizar(mecanico_id, datos.model_dump(mode="json"))
+
+
+@router.get("/{mecanico_id}/creditos", response_model=list[MovimientoCredito])
+def historial_de_creditos(mecanico_id: int):
+    with obtener_conexion() as con:
+        return RepositorioMecanico(con).historial_creditos(mecanico_id)
+
+
+@router.post("/{mecanico_id}/creditos", response_model=MecanicoRespuesta)
+def ajustar_creditos(mecanico_id: int, datos: AjusteCreditos):
+    """Recepción sube o baja créditos a mano, con un motivo (y el proyecto, si aplica)."""
+    with obtener_conexion() as con:
+        return RepositorioMecanico(con).ajustar_creditos(mecanico_id, datos.puntos, datos.motivo, datos.orden_id)
 
 
 @router.delete("/{mecanico_id}", response_model=MensajeRespuesta)

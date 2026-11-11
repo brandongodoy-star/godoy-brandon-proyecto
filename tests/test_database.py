@@ -41,6 +41,8 @@ def test_base_nueva_carga_datos_de_prueba(ruta_bd):
     assert contar(ruta_bd, "ordenes_servicio") == 11
     assert contar(ruta_bd, "detalle_orden") == 12
     assert contar(ruta_bd, "equipo_orden") == 4
+    assert contar(ruta_bd, "pagos") == 4
+    assert contar(ruta_bd, "peticiones") == 1
     assert version(ruta_bd) == database.VERSION_BD
 
 
@@ -128,7 +130,7 @@ def test_la_migracion_de_equipos_conserva_los_reportes(ruta_bd):
 
     database.inicializar_bd()
 
-    assert version(ruta_bd) == 3
+    assert version(ruta_bd) == database.VERSION_BD
     con = sqlite3.connect(ruta_bd)
     try:
         fila = con.execute("SELECT titulo, tipo, sobre_mecanico_id FROM reportes").fetchone()

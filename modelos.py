@@ -104,6 +104,8 @@ class OrdenEntrada(Entrada):
     fecha_ingreso: date = Field(default_factory=date.today)
     diagnostico: str | None = Field(default=None, max_length=300)
     mano_obra: float = Field(default=0, ge=0)
+    # Datos relevantes que dio el cliente; también los ven los mecánicos
+    indicaciones: str | None = Field(default=None, max_length=300)
     # mecanico_id es el líder del trabajo; equipo son los demás mecánicos que lo acompañan
     equipo: list[Annotated[int, Field(gt=0)]] = Field(default_factory=list, max_length=6)
 
@@ -195,6 +197,7 @@ class Trabajo(BaseModel):
     anio: int
     categoria: Categoria
     cliente: str
+    indicaciones: str | None = None
     lider: str
     soy_lider: bool
 
@@ -289,6 +292,23 @@ class ReporteRespuesta(BaseModel):
     sobre_mecanico: str | None = None
 
 
+class PeticionRespuesta(BaseModel):
+    id: int
+    orden_id: int
+    placa: str
+    mecanico_id: int
+    mecanico: str
+    repuesto_id: int
+    repuesto: str
+    existencia: int
+    cantidad: int
+    motivo: str | None = None
+    estado: Literal["pendiente", "enviada", "rechazada"]
+    respuesta: str | None = None
+    fecha: str
+    fecha_respuesta: str | None = None
+
+
 class TrabajoDetalle(Trabajo):
     repuestos: list[RepuestoDeTrabajo]
     creditos: int | None = None
@@ -296,6 +316,7 @@ class TrabajoDetalle(Trabajo):
     # El líder solo dirige mientras el trabajo está «recibido» o «en reparacion»
     puedo_dirigir: bool
     reportes_equipo: list[ReporteRespuesta]
+    peticiones: list[PeticionRespuesta]
 
 
 class NotificacionRespuesta(BaseModel):
@@ -307,3 +328,88 @@ class NotificacionRespuesta(BaseModel):
     mecanico: str | None = None
     leida: bool
     fecha: str
+
+
+# ---------- Peticiones de material ----------
+class PeticionEntrada(Entrada):
+    repuesto_id: int = Field(gt=0)
+    cantidad: int = Field(gt=0, le=50)
+    motivo: str | None = Field(default=None, max_length=200)
+
+
+class RechazoEntrada(Entrada):
+    respuesta: str = Field(min_length=3, max_length=200)
+
+
+class RepuestoDisponible(BaseModel):
+    """Lo que el mecánico ve del almacén para pedir material: sin precios."""
+
+    id: int
+    nombre: str
+    existencia: int
+
+
+# ---------- Cobros ----------
+MetodoPago = Literal["efectivo", "tarjeta", "transferencia"]
+EstadoPago = Literal["pendiente", "parcial", "pagado"]
+
+
+class PagoEntrada(Entrada):
+    monto: float = Field(gt=0)
+    metodo: MetodoPago
+    referencia: str | None = Field(default=None, max_length=60)
+
+
+class PagoRespuesta(BaseModel):
+    id: int
+    orden_id: int
+    monto: float
+    metodo: MetodoPago
+    referencia: str | None = None
+    registrado_por: str | None = None
+    fecha: str
+
+
+class CobroProyecto(BaseModel):
+    id: int
+    estado: EstadoOrden
+    fecha_ingreso: date
+    placa: str
+    marca: str
+    modelo: str
+    cliente: str
+    telefono: str
+    total: float
+    pagado: float
+    saldo: float
+    estado_pago: EstadoPago
+
+
+class CobroDetalle(CobroProyecto):
+    pagos: list[PagoRespuesta]
+
+
+# ---------- Puntuaciones ----------
+class AjusteCreditos(Entrada):
+    puntos: int = Field(ge=-100, le=100)
+    motivo: str = Field(min_length=5, max_length=200)
+    orden_id: int | None = Field(default=None, gt=0)
+
+    @field_validator("puntos")
+    @classmethod
+    def puntos_distintos_de_cero(cls, valor: int) -> int:
+        if valor == 0:
+            raise ValueError("Los puntos no pueden ser 0")
+        return valor
+
+
+# ---------- Historial de un vehículo ----------
+class ProyectoDeVehiculo(BaseModel):
+    id: int
+    estado: EstadoOrden
+    fecha_ingreso: date
+    diagnostico: str | None = None
+    lider: str
+    calificacion: Calificacion | None = None
+    total: float
+    pagado: float

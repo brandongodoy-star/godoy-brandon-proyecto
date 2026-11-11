@@ -1,5 +1,7 @@
 PRAGMA foreign_keys = ON;
 
+DROP TABLE IF EXISTS pagos;
+DROP TABLE IF EXISTS peticiones;
 DROP TABLE IF EXISTS notificaciones;
 DROP TABLE IF EXISTS reportes;
 DROP TABLE IF EXISTS equipo_orden;
@@ -58,6 +60,7 @@ CREATE TABLE ordenes_servicio (
                   CHECK (estado IN ('recibido', 'en reparacion', 'listo', 'entregado')),
     mano_obra     REAL NOT NULL DEFAULT 0 CHECK (mano_obra >= 0),
     calificacion  TEXT CHECK (calificacion IN ('excelente', 'bien', 'con problemas', 'rehacer')),
+    indicaciones  TEXT,  -- lo que pidió o avisó el cliente; los mecánicos también lo ven
     FOREIGN KEY (vehiculo_id) REFERENCES vehiculos(id),
     FOREIGN KEY (mecanico_id) REFERENCES mecanicos(id)
 );
@@ -126,6 +129,31 @@ CREATE TABLE equipo_orden (
     tarea        TEXT,
     calificacion TEXT CHECK (calificacion IN ('excelente', 'bien', 'con problemas', 'rehacer')),
     UNIQUE (orden_id, mecanico_id)
+);
+
+-- Pagos del cliente por cada proyecto (puede pagar en partes, por ejemplo con un anticipo)
+CREATE TABLE pagos (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    orden_id       INTEGER NOT NULL REFERENCES ordenes_servicio(id),
+    monto          REAL NOT NULL CHECK (monto > 0),
+    metodo         TEXT NOT NULL CHECK (metodo IN ('efectivo', 'tarjeta', 'transferencia')),
+    referencia     TEXT,
+    registrado_por TEXT,
+    fecha          TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+-- Materiales que los mecánicos piden al almacén; recepción los envía o los rechaza
+CREATE TABLE peticiones (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    orden_id        INTEGER NOT NULL REFERENCES ordenes_servicio(id) ON DELETE CASCADE,
+    mecanico_id     INTEGER NOT NULL REFERENCES mecanicos(id),
+    repuesto_id     INTEGER NOT NULL REFERENCES repuestos(id),
+    cantidad        INTEGER NOT NULL CHECK (cantidad > 0),
+    motivo          TEXT,
+    estado          TEXT NOT NULL DEFAULT 'pendiente' CHECK (estado IN ('pendiente', 'enviada', 'rechazada')),
+    respuesta       TEXT,
+    fecha           TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    fecha_respuesta TEXT
 );
 
 
@@ -216,4 +244,17 @@ INSERT INTO equipo_orden (orden_id, mecanico_id, tarea) VALUES
 (11, 4, 'Cambio de aceite de la transmisión'),
 (11, 2, NULL);
 
-PRAGMA user_version = 3;
+UPDATE ordenes_servicio SET indicaciones = 'Llamar antes de cambiar piezas caras' WHERE id = 5;
+UPDATE ordenes_servicio SET indicaciones = 'El cliente necesita el carro el viernes' WHERE id = 11;
+
+-- Pagos: las entregadas están pagadas y la orden 3 tiene un anticipo
+INSERT INTO pagos (orden_id, monto, metodo, referencia, registrado_por, fecha) VALUES
+(1, 1140.00, 'efectivo',      NULL,       'recepcion', '2026-10-02 16:30:00'),
+(2, 1150.00, 'tarjeta',       'POS-4410', 'recepcion', '2026-10-04 11:15:00'),
+(9, 1100.00, 'transferencia', 'TRF-2087', 'recepcion', '2026-10-21 15:45:00'),
+(3, 1000.00, 'efectivo',      NULL,       'recepcion', '2026-10-05 09:10:00');
+
+INSERT INTO peticiones (orden_id, mecanico_id, repuesto_id, cantidad, motivo, fecha) VALUES
+(5, 2, 8, 2, 'Los amortiguadores traseros también están vencidos', '2026-10-11 10:20:00');
+
+PRAGMA user_version = 4;

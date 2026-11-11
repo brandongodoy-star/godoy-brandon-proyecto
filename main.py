@@ -11,10 +11,12 @@ from database import inicializar_bd
 from routers import (
     auth,
     clientes,
+    cobros,
     mecanico,
     mecanicos,
     notificaciones,
     ordenes,
+    peticiones,
     reportes,
     repuestos,
     usuarios,
@@ -42,6 +44,8 @@ app.include_router(usuarios.router)
 app.include_router(mecanico.router)
 app.include_router(notificaciones.router)
 app.include_router(reportes.router)
+app.include_router(peticiones.router)
+app.include_router(cobros.router)
 app.include_router(clientes.router)
 app.include_router(vehiculos.router)
 app.include_router(mecanicos.router)

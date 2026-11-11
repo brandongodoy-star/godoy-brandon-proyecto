@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, status
 
 from database import obtener_conexion
-from modelos import MensajeRespuesta, VehiculoEntrada, VehiculoRespuesta
+from modelos import MensajeRespuesta, ProyectoDeVehiculo, VehiculoEntrada, VehiculoRespuesta
 from repositorios import RepositorioVehiculo
 from seguridad import solo_personal
 
@@ -20,6 +20,12 @@ def listar_vehiculos(cliente_id: int | None = None):
 def obtener_vehiculo(vehiculo_id: int):
     with obtener_conexion() as con:
         return RepositorioVehiculo(con).obtener_por_id(vehiculo_id)
+
+
+@router.get("/{vehiculo_id}/historial", response_model=list[ProyectoDeVehiculo])
+def historial_del_vehiculo(vehiculo_id: int):
+    with obtener_conexion() as con:
+        return RepositorioVehiculo(con).historial(vehiculo_id)
 
 
 @router.post("", response_model=VehiculoRespuesta, status_code=status.HTTP_201_CREATED)
