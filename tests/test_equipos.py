@@ -230,4 +230,4 @@ def test_creditos_del_lider_y_del_equipo(cliente, recepcion, equipo):
     assert creditos == {"lider": 10, "ana": 15, "beto": 0}
 
     historial = cliente.get("/mecanico/perfil", headers=equipo["ana"]["encabezado"]).json()["historial"]
-    assert "líder «excelente»" in historial[0]["motivo"]
+    assert "líder «Excelente»" in historial[0]["motivo"]

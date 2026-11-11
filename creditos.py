@@ -16,6 +16,13 @@ NIVELES = (
 )
 
 PUNTOS_CALIFICACION = {"excelente": 20, "bien": 10, "con problemas": -10, "rehacer": -25}
+# Cómo se muestran: «retrabajo» es un arreglo que salió mal y hubo que volver a hacer
+NOMBRE_CALIFICACION = {
+    "excelente": "Excelente",
+    "bien": "Bueno",
+    "con problemas": "Con fallas",
+    "rehacer": "Requiere retrabajo",
+}
 MULTIPLICADOR_CATEGORIA = {"estandar": 1, "premium": 1.5, "lujo": 2}
 
 

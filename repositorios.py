@@ -2,7 +2,14 @@ import sqlite3
 
 from fastapi import HTTPException
 
-from creditos import NOMBRE_CATEGORIA, nivel_de, puede_trabajar, puntos_de_miembro, puntos_por
+from creditos import (
+    NOMBRE_CALIFICACION,
+    NOMBRE_CATEGORIA,
+    nivel_de,
+    puede_trabajar,
+    puntos_de_miembro,
+    puntos_por,
+)
 
 ESTADOS_ORDEN = ("recibido", "en reparacion", "listo", "entregado")
 ESTADOS_EDITABLES = ("recibido", "en reparacion")
@@ -12,6 +19,12 @@ TOTAL_ORDEN = """(o.mano_obra + COALESCE((
     SELECT SUM(d.cantidad * r.precio) FROM detalle_orden d JOIN repuestos r ON r.id = d.repuesto_id
     WHERE d.orden_id = o.id), 0))"""
 PAGADO_ORDEN = "COALESCE((SELECT SUM(p.monto) FROM pagos p WHERE p.orden_id = o.id), 0)"
+
+# Datos de quien paga y del método, iguales en pagos de proyectos y en ventas de repuestos
+COLUMNAS_PAGADOR = (
+    "metodo", "referencia", "pagador_nombres", "pagador_apellidos", "pagador_identidad", "pagador_correo",
+    "tarjeta_marca", "tarjeta_ultimos4", "tarjeta_titular", "autorizacion", "banco",
+)
 
 
 class RepositorioBase:
@@ -178,6 +191,7 @@ class RepositorioOrden(RepositorioBase):
     def crear(self, datos: dict) -> dict:
         self._validar_referencias(datos)
         miembros = self._validar_equipo(datos)
+        self._validar_disponibles([datos["mecanico_id"], *miembros])
         orden = super().crear(datos)
         self._guardar_equipo(orden["id"], miembros)
         return self.obtener_por_id(orden["id"])
@@ -186,9 +200,60 @@ class RepositorioOrden(RepositorioBase):
         actual = self.verificar_editable(orden_id)
         self._validar_referencias(datos, actual)
         miembros = self._validar_equipo(datos)
+        # Solo se revisa a los que entran nuevos: los que ya estaban en este proyecto siguen
+        ya_estaban = {actual["mecanico_id"], *actual["equipo"]}
+        self._validar_disponibles([m for m in [datos["mecanico_id"], *miembros] if m not in ya_estaban])
         super().actualizar(orden_id, datos)
         self._guardar_equipo(orden_id, miembros)
         return self.obtener_por_id(orden_id)
+
+    def ocupados(self) -> dict[int, int]:
+        """Mecánicos que ya trabajan en un proyecto activo: {mecanico_id: orden_id}."""
+        filas = self.con.execute(
+            """
+            SELECT o.mecanico_id, o.id AS orden_id FROM ordenes_servicio o
+            WHERE o.estado IN ('recibido', 'en reparacion')
+            UNION ALL
+            SELECT e.mecanico_id, e.orden_id FROM equipo_orden e
+            JOIN ordenes_servicio o ON o.id = e.orden_id WHERE o.estado IN ('recibido', 'en reparacion')
+            ORDER BY orden_id
+            """
+        ).fetchall()
+        ocupados: dict[int, int] = {}
+        for fila in filas:
+            ocupados.setdefault(fila["mecanico_id"], fila["orden_id"])
+        return ocupados
+
+    def _validar_disponibles(self, mecanicos: list[int]) -> None:
+        """Un mecánico que ya trabaja en un proyecto activo no está disponible para otro."""
+        ocupados = self.ocupados()
+        for mecanico_id in mecanicos:
+            if mecanico_id in ocupados:
+                nombre = RepositorioMecanico(self.con).obtener_por_id(mecanico_id)["nombre"]
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{nombre} no está disponible: trabaja en el proyecto #{ocupados[mecanico_id]}",
+                )
+
+    def equipo_detallado(self, orden_id: int) -> list[dict]:
+        """El líder y los acompañantes, con la tarea y la calificación que el líder dio a cada uno."""
+        self.obtener_por_id(orden_id)
+        filas = self.con.execute(
+            """
+            SELECT m.id AS mecanico_id, m.nombre, m.especialidad, m.creditos,
+                   1 AS es_lider, NULL AS tarea, NULL AS calificacion
+            FROM ordenes_servicio o JOIN mecanicos m ON m.id = o.mecanico_id WHERE o.id = :orden
+            UNION ALL
+            SELECT m.id, m.nombre, m.especialidad, m.creditos, 0, e.tarea, e.calificacion
+            FROM equipo_orden e JOIN mecanicos m ON m.id = e.mecanico_id WHERE e.orden_id = :orden
+            ORDER BY es_lider DESC, nombre
+            """,
+            {"orden": orden_id},
+        ).fetchall()
+        return [
+            {**dict(fila), "es_lider": bool(fila["es_lider"]), "nivel": nivel_de(fila["creditos"])["nombre"]}
+            for fila in filas
+        ]
 
     def _validar_equipo(self, datos: dict) -> list[int]:
         """Los miembros deben existir, estar activos y no repetir al líder."""
@@ -280,18 +345,19 @@ class RepositorioOrden(RepositorioBase):
             orden["mecanico_id"],
             orden["id"],
             puntos_por(calificacion, categoria),
-            f"Orden #{orden['id']} calificada «{calificacion}» ({auto})",
+            f"Proyecto #{orden['id']} como líder: recepción «{NOMBRE_CALIFICACION[calificacion]}» ({auto})",
         )
         miembros = self.con.execute(
             "SELECT mecanico_id, calificacion FROM equipo_orden WHERE orden_id = ?", (orden["id"],)
         ).fetchall()
         for miembro in miembros:
-            del_lider = miembro["calificacion"] or "sin calificar"
+            del_lider = NOMBRE_CALIFICACION.get(miembro["calificacion"], "sin calificar")
             mecanicos.sumar_creditos(
                 miembro["mecanico_id"],
                 orden["id"],
                 puntos_de_miembro(calificacion, miembro["calificacion"], categoria),
-                f"Orden #{orden['id']} en equipo: recepción «{calificacion}», líder «{del_lider}» ({auto})",
+                f"Proyecto #{orden['id']} en equipo: recepción «{NOMBRE_CALIFICACION[calificacion]}», "
+                f"líder «{del_lider}» ({auto})",
             )
 
     def _validar_referencias(self, datos: dict, actual: dict | None = None) -> None:
@@ -331,11 +397,17 @@ class RepositorioDetalle(RepositorioBase):
         ).fetchall()
         return [dict(fila) for fila in filas]
 
-    def agregar(self, orden_id: int, repuesto_id: int, cantidad: int) -> dict:
+    def agregar(self, orden_id: int, repuesto_id: int, cantidad: int, usuario: str | None = None) -> dict:
         """Agrega el repuesto a la orden y lo descuenta del inventario."""
         RepositorioOrden(self.con).verificar_editable(orden_id)
-        if not RepositorioRepuesto(self.con).hay_existencia(repuesto_id, cantidad):
+        repuesto = RepositorioRepuesto(self.con).obtener_por_id(repuesto_id)
+        if repuesto["existencia"] < cantidad:
             raise HTTPException(status_code=400, detail="No hay existencia suficiente")
+        RepositorioMovimiento(self.con).registrar(
+            "repuesto_usado",
+            f"{repuesto['nombre']} × {cantidad} en el proyecto #{orden_id}",
+            cantidad=cantidad, repuesto_id=repuesto_id, orden_id=orden_id, usuario=usuario,
+        )
         self.con.execute(
             "UPDATE repuestos SET existencia = existencia - ? WHERE id = ?",
             (cantidad, repuesto_id),
@@ -359,7 +431,7 @@ class RepositorioDetalle(RepositorioBase):
             self.con.execute(self.CONSULTA_COMPLETA + " WHERE d.id = ?", (detalle_id,)).fetchone()
         )
 
-    def quitar(self, orden_id: int, detalle_id: int) -> None:
+    def quitar(self, orden_id: int, detalle_id: int, usuario: str | None = None) -> None:
         """Quita la línea de la orden y devuelve los repuestos al inventario."""
         RepositorioOrden(self.con).verificar_editable(orden_id)
         detalle = self.obtener_por_id(detalle_id)
@@ -368,6 +440,12 @@ class RepositorioDetalle(RepositorioBase):
         self.con.execute(
             "UPDATE repuestos SET existencia = existencia + ? WHERE id = ?",
             (detalle["cantidad"], detalle["repuesto_id"]),
+        )
+        nombre = RepositorioRepuesto(self.con).obtener_por_id(detalle["repuesto_id"])["nombre"]
+        RepositorioMovimiento(self.con).registrar(
+            "repuesto_devuelto",
+            f"{nombre} × {detalle['cantidad']} devuelto al almacén desde el proyecto #{orden_id}",
+            cantidad=detalle["cantidad"], repuesto_id=detalle["repuesto_id"], orden_id=orden_id, usuario=usuario,
         )
         super().eliminar(detalle_id)
 
@@ -410,6 +488,18 @@ class RepositorioNotificacion(RepositorioBase):
 
     def marcar_todas(self) -> int:
         return self.con.execute("UPDATE notificaciones SET leida = 1 WHERE leida = 0").rowcount
+
+    def de_orden(self, orden_id: int) -> list[dict]:
+        """Avisos de un proyecto en orden de llegada: los problemas que surgieron y la nota final."""
+        filas = self.con.execute(
+            """
+            SELECT n.tipo, n.mensaje, n.fecha, m.nombre AS mecanico FROM notificaciones n
+            LEFT JOIN mecanicos m ON m.id = n.mecanico_id
+            WHERE n.orden_id = ? AND n.tipo IN ('avance', 'listo') ORDER BY n.id
+            """,
+            (orden_id,),
+        ).fetchall()
+        return [dict(fila) for fila in filas]
 
 
 class RepositorioReporte(RepositorioBase):
@@ -462,9 +552,37 @@ class RepositorioReporte(RepositorioBase):
         )
         return self.obtener_completo(reporte["id"])
 
-    def resolver(self, reporte_id: int) -> dict:
-        self.obtener_por_id(reporte_id)
-        self.con.execute("UPDATE reportes SET estado = 'resuelto' WHERE id = ?", (reporte_id,))
+    def resolver(self, reporte_id: int, penalizacion: int = 0, comentario: str | None = None) -> dict:
+        """Cierra el reporte. Si es de un líder sobre su equipo, recepción puede bajarle créditos
+        al reportado, y el reportado recibe el reporte en su bandeja."""
+        reporte = self.obtener_completo(reporte_id)
+        if reporte["estado"] == "resuelto":
+            raise HTTPException(status_code=400, detail="Este reporte ya fue resuelto")
+        sobre = reporte["sobre_mecanico_id"]
+        if penalizacion and sobre is None:
+            raise HTTPException(status_code=400, detail="Este reporte no es sobre un mecánico: no se puede penalizar")
+        if sobre is not None:
+            if penalizacion:
+                RepositorioMecanico(self.con).sumar_creditos(
+                    sobre, reporte["orden_id"], -penalizacion, f"Reporte de su líder: «{reporte['titulo']}»"
+                )
+            texto = f"{reporte['mecanico']} lo reportó: {reporte['descripcion']}"
+            texto += f"\n\nRecepción le bajó {penalizacion} créditos." if penalizacion else "\n\nRecepción no le bajó créditos."
+            if comentario:
+                texto += f"\nComentario de recepción: {comentario}"
+            RepositorioMensaje(self.con).crear(
+                {
+                    "mecanico_id": sobre,
+                    "remitente": "Recepción",
+                    "asunto": f"Reporte de su líder: {reporte['titulo']}",
+                    "texto": texto,
+                    "orden_id": reporte["orden_id"],
+                }
+            )
+        self.con.execute(
+            "UPDATE reportes SET estado = 'resuelto', penalizacion = ?, comentario = ? WHERE id = ?",
+            (penalizacion if sobre is not None else None, comentario, reporte_id),
+        )
         return self.obtener_completo(reporte_id)
 
 
@@ -530,7 +648,8 @@ class RepositorioTrabajos:
             **trabajo,
             "repuestos": [dict(fila) for fila in repuestos],
             "creditos": creditos,
-            "equipo": self._equipo(orden_id),
+            "equipo": RepositorioOrden(self.con).equipo_detallado(orden_id),
+            "novedades": RepositorioNotificacion(self.con).de_orden(orden_id),
             "puedo_dirigir": self._puede_dirigir(trabajo),
             "reportes_equipo": reportes,
             "peticiones": RepositorioPeticion(self.con).listar(orden_id=orden_id),
@@ -570,8 +689,8 @@ class RepositorioTrabajos:
             )
         self._cambiar_estado(orden_id, "listo")
         mensaje = (
-            f"La orden #{orden_id} ({trabajo['placa']}, {trabajo['marca']} {trabajo['modelo']}) "
-            "está lista para entregar."
+            f"El proyecto #{orden_id} ({trabajo['placa']}, {trabajo['marca']} {trabajo['modelo']}) "
+            "está listo para entregar."
         )
         self._avisar("listo", mensaje + (f" Nota: {nota}" if nota else ""), orden_id)
         return self.detalle(orden_id)
@@ -582,7 +701,7 @@ class RepositorioTrabajos:
         if trabajo["estado"] not in ESTADOS_EDITABLES:
             raise HTTPException(status_code=400, detail="Este trabajo ya terminó")
         estado = self.NOMBRE_ESTADO[trabajo["estado"]]
-        self._avisar("avance", f"Orden #{orden_id} ({trabajo['placa']}) sigue {estado}: {mensaje}", orden_id)
+        self._avisar("avance", f"Proyecto #{orden_id} ({trabajo['placa']}) sigue {estado}: {mensaje}", orden_id)
 
     # ---------- Lo que solo puede hacer el líder, y solo mientras dura el trabajo ----------
     def dirigir_miembro(self, orden_id: int, miembro_id: int, cambios: dict) -> dict:
@@ -651,24 +770,6 @@ class RepositorioTrabajos:
             },
             "historial": [dict(fila) for fila in historial],
         }
-
-    def _equipo(self, orden_id: int) -> list[dict]:
-        filas = self.con.execute(
-            """
-            SELECT m.id AS mecanico_id, m.nombre, m.especialidad, m.creditos,
-                   1 AS es_lider, NULL AS tarea, NULL AS calificacion
-            FROM ordenes_servicio o JOIN mecanicos m ON m.id = o.mecanico_id WHERE o.id = :orden
-            UNION ALL
-            SELECT m.id, m.nombre, m.especialidad, m.creditos, 0, e.tarea, e.calificacion
-            FROM equipo_orden e JOIN mecanicos m ON m.id = e.mecanico_id WHERE e.orden_id = :orden
-            ORDER BY es_lider DESC, nombre
-            """,
-            {"orden": orden_id},
-        ).fetchall()
-        return [
-            {**dict(fila), "es_lider": bool(fila["es_lider"]), "nivel": nivel_de(fila["creditos"])["nombre"]}
-            for fila in filas
-        ]
 
     @staticmethod
     def _con_booleanos(fila: sqlite3.Row) -> dict:
@@ -743,11 +844,31 @@ class RepositorioPeticion(RepositorioBase):
         self.obtener_por_id(peticion_id)
         return dict(self.con.execute(self.CONSULTA_COMPLETA + " WHERE p.id = ?", (peticion_id,)).fetchone())
 
-    def enviar(self, peticion_id: int) -> dict:
-        """Manda el material: se agrega al proyecto y se descuenta del almacén."""
-        peticion = self._exigir_pendiente(peticion_id)
-        RepositorioDetalle(self.con).agregar(peticion["orden_id"], peticion["repuesto_id"], peticion["cantidad"])
+    def enviar(self, peticion_id: int, usuario: str | None = None) -> dict:
+        """Acepta la solicitud y manda el material: se agrega al proyecto, se descuenta del almacén
+        y el mecánico que lo pidió recibe un aviso en su bandeja."""
+        self._exigir_pendiente(peticion_id)
+        peticion = self.obtener_completa(peticion_id)
+        RepositorioDetalle(self.con).agregar(
+            peticion["orden_id"], peticion["repuesto_id"], peticion["cantidad"], usuario
+        )
         self._responder(peticion_id, "enviada", None)
+        material = f"{peticion['repuesto']} × {peticion['cantidad']}"
+        RepositorioMovimiento(self.con).registrar(
+            "solicitud_aceptada",
+            f"Solicitud de {peticion['mecanico']}: {material} al proyecto #{peticion['orden_id']}",
+            cantidad=peticion["cantidad"], repuesto_id=peticion["repuesto_id"],
+            orden_id=peticion["orden_id"], usuario=usuario,
+        )
+        RepositorioMensaje(self.con).crear(
+            {
+                "mecanico_id": peticion["mecanico_id"],
+                "remitente": "Recepción",
+                "asunto": f"Material enviado: {material}",
+                "texto": f"Recepción aceptó su solicitud y envió {material} al proyecto #{peticion['orden_id']}.",
+                "orden_id": peticion["orden_id"],
+            }
+        )
         return self.obtener_completa(peticion_id)
 
     def rechazar(self, peticion_id: int, respuesta: str) -> dict:
@@ -775,7 +896,7 @@ class RepositorioPago(RepositorioBase):
     """Cobros a los clientes. Un proyecto se puede pagar en partes, sin pasarse del total."""
 
     tabla = "pagos"
-    columnas = ("orden_id", "monto", "metodo", "referencia", "registrado_por")
+    columnas = ("orden_id", "monto", "tipo", *COLUMNAS_PAGADOR, "registrado_por")
     no_encontrado = "Pago no encontrado"
 
     CONSULTA_COBROS = f"""
@@ -800,13 +921,36 @@ class RepositorioPago(RepositorioBase):
         return {**self._con_saldo(fila), "pagos": [dict(pago) for pago in pagos]}
 
     def registrar(self, orden_id: int, datos: dict, usuario: str) -> dict:
-        saldo = self.cobro(orden_id)["saldo"]
-        if saldo <= 0:
+        """Registra un pago o un anticipo. Los anticipos solo antes de que el trabajo esté listo."""
+        cobro = self.cobro(orden_id)
+        if cobro["saldo"] <= 0:
             raise HTTPException(status_code=400, detail="Este proyecto ya está pagado")
-        if round(datos["monto"], 2) > saldo:
-            raise HTTPException(status_code=400, detail=f"El pago es mayor que el saldo (L {saldo:,.2f})")
-        self.crear({**datos, "monto": round(datos["monto"], 2), "orden_id": orden_id, "registrado_por": usuario})
+        if round(datos["monto"], 2) > cobro["saldo"]:
+            raise HTTPException(status_code=400, detail=f"El pago es mayor que el saldo (L {cobro['saldo']:,.2f})")
+        if datos["tipo"] == "anticipo" and cobro["estado"] not in ESTADOS_EDITABLES:
+            raise HTTPException(
+                status_code=400,
+                detail="Los anticipos se registran antes de que el trabajo esté listo; registre un pago",
+            )
+        monto = round(datos["monto"], 2)
+        self.crear({**datos, "monto": monto, "orden_id": orden_id, "registrado_por": usuario})
+        nombre = "Anticipo" if datos["tipo"] == "anticipo" else "Pago"
+        RepositorioMovimiento(self.con).registrar(
+            datos["tipo"],
+            f"{nombre} del proyecto #{orden_id} · {datos['pagador_nombres']} {datos['pagador_apellidos']} "
+            f"· {datos['metodo']}",
+            monto=monto, orden_id=orden_id, usuario=usuario,
+        )
         return self.cobro(orden_id)
+
+    def anular(self, pago_id: int, usuario: str) -> None:
+        pago = self.obtener_por_id(pago_id)
+        self.eliminar(pago_id)
+        RepositorioMovimiento(self.con).registrar(
+            "pago_anulado",
+            f"Se anuló un {pago['tipo']} de L {pago['monto']:,.2f} del proyecto #{pago['orden_id']}",
+            monto=-pago["monto"], orden_id=pago["orden_id"], usuario=usuario,
+        )
 
     @staticmethod
     def _con_saldo(fila: sqlite3.Row) -> dict:
@@ -821,3 +965,128 @@ class RepositorioPago(RepositorioBase):
         else:
             cobro["estado_pago"] = "pendiente"
         return cobro
+
+
+class RepositorioMensaje(RepositorioBase):
+    """Mensajería entre recepción y los mecánicos. Cada mensaje pertenece a la conversación de un
+    mecánico; «direccion» dice si lo envió recepción (a_mecanico) o el mecánico (a_recepcion)."""
+
+    tabla = "mensajes"
+    columnas = ("mecanico_id", "remitente", "asunto", "texto", "orden_id", "direccion")
+    no_encontrado = "Mensaje no encontrado"
+
+    CONSULTA_COMPLETA = "SELECT x.*, m.nombre AS mecanico FROM mensajes x JOIN mecanicos m ON m.id = x.mecanico_id"
+
+    def enviar(self, mecanico_ids: list[int], datos: dict, remitente: str) -> list[dict]:
+        """Recepción manda el mismo mensaje a cada mecánico de la lista."""
+        if datos.get("orden_id") is not None:
+            RepositorioOrden(self.con).obtener_por_id(datos["orden_id"])
+        enviados = []
+        for mecanico_id in dict.fromkeys(mecanico_ids):
+            RepositorioMecanico(self.con).obtener_por_id(mecanico_id)
+            mensaje = self.crear({**datos, "mecanico_id": mecanico_id, "remitente": remitente})
+            enviados.append(self.obtener_completo(mensaje["id"]))
+        return enviados
+
+    def escribir_a_recepcion(self, mecanico_id: int, datos: dict) -> dict:
+        """Un mecánico le escribe a recepción; solo puede hacerlo mientras tenga un proyecto activo."""
+        if mecanico_id not in RepositorioOrden(self.con).ocupados():
+            raise HTTPException(
+                status_code=403, detail="Solo puede escribir a recepción mientras tenga un proyecto activo"
+            )
+        if datos.get("orden_id") is not None:
+            RepositorioTrabajos(self.con, mecanico_id).obtener(datos["orden_id"])
+        nombre = RepositorioMecanico(self.con).obtener_por_id(mecanico_id)["nombre"]
+        mensaje = self.crear({**datos, "mecanico_id": mecanico_id, "remitente": nombre, "direccion": "a_recepcion"})
+        return self.obtener_completo(mensaje["id"])
+
+    def listar(self, mecanico_id: int | None = None, direccion: str | None = None) -> list[dict]:
+        filtros = {"x.mecanico_id": mecanico_id, "x.direccion": direccion}
+        filtros = {campo: valor for campo, valor in filtros.items() if valor is not None}
+        where = " AND ".join(f"{campo} = ?" for campo in filtros)
+        filas = self.con.execute(
+            self.CONSULTA_COMPLETA + (f" WHERE {where}" if where else "") + " ORDER BY x.id DESC",
+            list(filtros.values()),
+        ).fetchall()
+        return [dict(fila) for fila in filas]
+
+    def obtener_completo(self, mensaje_id: int) -> dict:
+        self.obtener_por_id(mensaje_id)
+        return dict(self.con.execute(self.CONSULTA_COMPLETA + " WHERE x.id = ?", (mensaje_id,)).fetchone())
+
+    def marcar_leido(self, mensaje_id: int, mecanico_id: int) -> None:
+        """El mecánico marca como leído un mensaje que le mandó recepción."""
+        mensaje = self.obtener_por_id(mensaje_id)
+        # Un mensaje de otro mecánico, o uno que él mismo envió, responde como si no existiera
+        if mensaje["mecanico_id"] != mecanico_id or mensaje["direccion"] != "a_mecanico":
+            raise HTTPException(status_code=404, detail=self.no_encontrado)
+        self.con.execute("UPDATE mensajes SET leido = 1 WHERE id = ?", (mensaje_id,))
+
+    def marcar_todos(self, mecanico_id: int) -> int:
+        return self.con.execute(
+            "UPDATE mensajes SET leido = 1 WHERE mecanico_id = ? AND direccion = 'a_mecanico' AND leido = 0",
+            (mecanico_id,),
+        ).rowcount
+
+    def marcar_leido_por_recepcion(self, mensaje_id: int) -> None:
+        if self.obtener_por_id(mensaje_id)["direccion"] != "a_recepcion":
+            raise HTTPException(status_code=400, detail="Ese mensaje lo envió recepción")
+        self.con.execute("UPDATE mensajes SET leido = 1 WHERE id = ?", (mensaje_id,))
+
+
+class RepositorioVenta(RepositorioBase):
+    """Venta de un repuesto suelto (producto individual), sin proyecto de taller."""
+
+    tabla = "ventas"
+    columnas = ("repuesto_id", "cantidad", "precio_unitario", "total", *COLUMNAS_PAGADOR, "registrado_por")
+    no_encontrado = "Venta no encontrada"
+
+    CONSULTA_COMPLETA = "SELECT x.*, r.nombre AS repuesto FROM ventas x JOIN repuestos r ON r.id = x.repuesto_id"
+
+    def vender(self, datos: dict, usuario: str) -> dict:
+        repuesto = RepositorioRepuesto(self.con).obtener_por_id(datos["repuesto_id"])
+        if repuesto["existencia"] < datos["cantidad"]:
+            raise HTTPException(
+                status_code=400, detail=f"No hay existencia suficiente: quedan {repuesto['existencia']}"
+            )
+        total = round(repuesto["precio"] * datos["cantidad"], 2)
+        self.con.execute(
+            "UPDATE repuestos SET existencia = existencia - ? WHERE id = ?", (datos["cantidad"], repuesto["id"])
+        )
+        venta = self.crear(
+            {**datos, "precio_unitario": repuesto["precio"], "total": total, "registrado_por": usuario}
+        )
+        RepositorioMovimiento(self.con).registrar(
+            "venta",
+            f"Venta de {repuesto['nombre']} × {datos['cantidad']} · "
+            f"{datos['pagador_nombres']} {datos['pagador_apellidos']} · {datos['metodo']}",
+            monto=total, cantidad=datos["cantidad"], repuesto_id=repuesto["id"], usuario=usuario,
+        )
+        return self.obtener_completa(venta["id"])
+
+    def listar(self) -> list[dict]:
+        return [dict(fila) for fila in self.con.execute(self.CONSULTA_COMPLETA + " ORDER BY x.id DESC")]
+
+    def obtener_completa(self, venta_id: int) -> dict:
+        self.obtener_por_id(venta_id)
+        return dict(self.con.execute(self.CONSULTA_COMPLETA + " WHERE x.id = ?", (venta_id,)).fetchone())
+
+
+class RepositorioMovimiento(RepositorioBase):
+    """Historial de movimientos: pagos, ventas, solicitudes aceptadas y repuestos usados o devueltos."""
+
+    tabla = "movimientos"
+    columnas = ("tipo", "descripcion", "monto", "cantidad", "repuesto_id", "orden_id", "usuario")
+    no_encontrado = "Movimiento no encontrado"
+
+    def registrar(self, tipo: str, descripcion: str, **campos) -> None:
+        self.crear({"tipo": tipo, "descripcion": descripcion, **campos})
+
+    def listar(self, tipos: list[str] | None = None, limite: int = 500) -> list[dict]:
+        where = f" WHERE x.tipo IN ({', '.join('?' for _ in tipos)})" if tipos else ""
+        filas = self.con.execute(
+            "SELECT x.*, r.nombre AS repuesto FROM movimientos x LEFT JOIN repuestos r ON r.id = x.repuesto_id"
+            + where + " ORDER BY x.fecha DESC, x.id DESC LIMIT ?",
+            [*(tipos or []), limite],
+        ).fetchall()
+        return [dict(fila) for fila in filas]

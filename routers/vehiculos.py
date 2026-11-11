@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, status
 from database import obtener_conexion
 from modelos import MensajeRespuesta, ProyectoDeVehiculo, VehiculoEntrada, VehiculoRespuesta
 from repositorios import RepositorioVehiculo
-from seguridad import solo_personal
+from seguridad import solo_administrador, solo_personal
 
 router = APIRouter(
     prefix="/vehiculos", tags=["Vehículos"], dependencies=[Depends(solo_personal)]
@@ -34,13 +34,14 @@ def crear_vehiculo(datos: VehiculoEntrada):
         return RepositorioVehiculo(con).crear(datos.model_dump(mode="json"))
 
 
-@router.put("/{vehiculo_id}", response_model=VehiculoRespuesta)
+# Editar y eliminar es solo de la administración: recepción puede ver y crear
+@router.put("/{vehiculo_id}", response_model=VehiculoRespuesta, dependencies=[Depends(solo_administrador)])
 def actualizar_vehiculo(vehiculo_id: int, datos: VehiculoEntrada):
     with obtener_conexion() as con:
         return RepositorioVehiculo(con).actualizar(vehiculo_id, datos.model_dump(mode="json"))
 
 
-@router.delete("/{vehiculo_id}", response_model=MensajeRespuesta)
+@router.delete("/{vehiculo_id}", response_model=MensajeRespuesta, dependencies=[Depends(solo_administrador)])
 def eliminar_vehiculo(vehiculo_id: int):
     with obtener_conexion() as con:
         RepositorioVehiculo(con).eliminar(vehiculo_id)

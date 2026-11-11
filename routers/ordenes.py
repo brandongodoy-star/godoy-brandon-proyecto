@@ -7,6 +7,7 @@ from modelos import (
     DetalleRespuesta,
     EstadoOrden,
     MensajeRespuesta,
+    MiembroEquipo,
     OrdenEntrada,
     OrdenRespuesta,
     TotalOrden,
@@ -74,13 +75,20 @@ def listar_repuestos_de_orden(orden_id: int):
 @router.post(
     "/{orden_id}/repuestos", response_model=DetalleRespuesta, status_code=status.HTTP_201_CREATED
 )
-def agregar_repuesto(orden_id: int, datos: DetalleEntrada):
+def agregar_repuesto(orden_id: int, datos: DetalleEntrada, usuario: dict = Depends(solo_personal)):
     with obtener_conexion() as con:
-        return RepositorioDetalle(con).agregar(orden_id, datos.repuesto_id, datos.cantidad)
+        return RepositorioDetalle(con).agregar(orden_id, datos.repuesto_id, datos.cantidad, usuario["username"])
 
 
 @router.delete("/{orden_id}/repuestos/{detalle_id}", response_model=MensajeRespuesta)
-def quitar_repuesto(orden_id: int, detalle_id: int):
+def quitar_repuesto(orden_id: int, detalle_id: int, usuario: dict = Depends(solo_personal)):
     with obtener_conexion() as con:
-        RepositorioDetalle(con).quitar(orden_id, detalle_id)
+        RepositorioDetalle(con).quitar(orden_id, detalle_id, usuario["username"])
     return {"mensaje": "Repuesto quitado y devuelto al inventario"}
+
+
+@router.get("/{orden_id}/equipo", response_model=list[MiembroEquipo])
+def ver_equipo(orden_id: int):
+    """Líder y acompañantes, con la tarea y el resultado que el líder dio a cada uno."""
+    with obtener_conexion() as con:
+        return RepositorioOrden(con).equipo_detallado(orden_id)

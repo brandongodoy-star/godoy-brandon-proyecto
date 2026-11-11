@@ -89,11 +89,12 @@ const NIVELES = [
   { nombre: "Técnico", minimo: 100, categoria: "premium", clase: "insignia-premium" },
   { nombre: "Maestro", minimo: 250, categoria: "lujo", clase: "insignia-lujo" },
 ];
+// Mismos nombres que creditos.NOMBRE_CALIFICACION; «retrabajo» es un arreglo que hubo que volver a hacer
 const CALIFICACIONES = [
   { clave: "excelente", nombre: "Excelente", puntos: 20, texto: "Quedó perfecto y a tiempo" },
-  { clave: "bien", nombre: "Bien", puntos: 10, texto: "Cumplió con lo esperado" },
-  { clave: "con problemas", nombre: "Con problemas", puntos: -10, texto: "Hubo detalles o retrasos" },
-  { clave: "rehacer", nombre: "Hubo que rehacerlo", puntos: -25, texto: "El trabajo salió mal" },
+  { clave: "bien", nombre: "Bueno", puntos: 10, texto: "Cumplió con lo esperado" },
+  { clave: "con problemas", nombre: "Con fallas", puntos: -10, texto: "Quedaron detalles o hubo retrasos" },
+  { clave: "rehacer", nombre: "Requiere retrabajo", puntos: -25, texto: "Salió mal y hay que volver a repararlo" },
 ];
 const TIPOS_REPORTE = {
   equipo: "Falla de equipo o herramienta",
@@ -104,6 +105,8 @@ const TIPOS_REPORTE = {
 const ROLES = { administrador: "Administración", recepcion: "Recepción", mecanico: "Mecánico" };
 
 const nivelDe = (creditos) => [...NIVELES].reverse().find((n) => creditos >= n.minimo);
+const puedeTrabajar = (creditos, categoria) =>
+  NIVELES.findIndex((n) => n.categoria === categoria) <= NIVELES.indexOf(nivelDe(creditos));
 const puntosPor = (calificacion, categoria) =>
   Math.trunc(CALIFICACIONES.find((c) => c.clave === calificacion).puntos * CATEGORIAS[categoria].multiplicador);
 const nombreCalificacion = (clave) => CALIFICACIONES.find((c) => c.clave === clave)?.nombre ?? clave;
@@ -197,10 +200,11 @@ async function intentar(accion) {
 
 async function cargarDatos() {
   const rutas = esMecanico()
-    ? { trabajos: "/mecanico/trabajos", perfil: "/mecanico/perfil", reportes: "/mecanico/reportes", almacen: "/mecanico/repuestos" }
+    ? { trabajos: "/mecanico/trabajos", perfil: "/mecanico/perfil", reportes: "/mecanico/reportes", almacen: "/mecanico/repuestos", mensajes: "/mecanico/mensajes" }
     : {
         clientes: "/clientes", vehiculos: "/vehiculos", mecanicos: "/mecanicos", repuestos: "/repuestos", ordenes: "/ordenes",
-        notificaciones: "/notificaciones", peticiones: "/peticiones", reportesTaller: "/reportes", cobros: "/cobros",
+        notificaciones: "/notificaciones", peticiones: "/peticiones", reportesTaller: "/reportes", cobros: "/cobros", mensajes: "/mensajes",
+        ventas: "/ventas", movimientos: "/movimientos",
       };
   if (estado.yo.rol === "administrador") rutas.usuarios = "/usuarios";
   const respuestas = await Promise.all(Object.values(rutas).map((ruta) => api(ruta)));
@@ -271,7 +275,10 @@ const encabezadoDialogo = (titulo, subtitulo = "") => `
 // ===================== Formularios genéricos =====================
 function campoHTML(campo, valor) {
   const id = `campo-${campo.nombre}`;
+  // «grupo»: campos que se muestran solo con cierta opción (por ejemplo, los de la tarjeta)
   const clase = `campo${campo.completo ? " completo" : ""}${campo.tipo === "checkbox" ? " campo-check" : ""}`;
+  const grupo = campo.grupo ? ` data-grupo="${campo.grupo}"` : "";
+  const enLinea = campo.enLinea ? " en-linea" : "";
   const atributos = [
     campo.requerido ? "required" : "",
     campo.minlength ? `minlength="${campo.minlength}"` : "",
@@ -281,34 +288,47 @@ function campoHTML(campo, valor) {
     campo.paso ? `step="${campo.paso}"` : "",
     campo.patron ? `pattern="${campo.patron}"` : "",
     campo.autocompletar ? `autocomplete="${campo.autocompletar}"` : "",
+    campo.teclado ? `inputmode="${campo.teclado}"` : "",
   ].join(" ");
   const ayuda = campo.ayuda ? `<span class="ayuda">${esc(campo.ayuda)}</span>` : "";
 
   if (campo.tipo === "checkbox") {
-    return `<div class="${clase}"><input id="${id}" name="${campo.nombre}" type="checkbox" ${valor ? "checked" : ""} />
+    return `<div class="${clase}"${grupo}><input id="${id}" name="${campo.nombre}" type="checkbox" ${valor ? "checked" : ""} />
       <label for="${id}">${esc(campo.etiqueta)}</label></div>`;
   }
-  if (campo.tipo === "checks") {
-    const elegidos = new Set(valor ?? []);
-    const opciones = campo.opciones.map((o) => `
-      <label class="check"><input type="checkbox" name="${campo.nombre}" value="${esc(o.valor)}" ${elegidos.has(o.valor) ? "checked" : ""} />
-        <span>${esc(o.texto)}</span></label>`).join("");
-    return `<fieldset class="${clase} campo-checks"><legend>${esc(campo.etiqueta)}</legend>
-      <div class="lista-checks">${opciones || `<span class="ayuda">${esc(campo.textoVacio ?? "No hay opciones")}</span>`}</div>${ayuda}</fieldset>`;
+  if (campo.tipo === "checks" || campo.tipo === "radios") {
+    // Lista de opciones (varias con «checks», una con «radios»); «bloqueado» explica por qué no se puede elegir
+    const varias = campo.tipo === "checks";
+    const elegidos = new Set(varias ? valor ?? [] : valor == null ? [] : [valor]);
+    const opciones = campo.opciones.map((o) => {
+      const datos = Object.entries(o.datos ?? {}).map(([clave, v]) => `data-${clave}="${esc(v)}"`).join(" ");
+      return `
+      <label class="opcion ${o.bloqueado ? "bloqueada" : ""}" data-texto="${esc(`${o.texto} ${o.detalle ?? ""}`.toLowerCase())}" ${o.bloqueado ? 'data-bloqueado="1"' : ""} ${datos}>
+        <input type="${varias ? "checkbox" : "radio"}" name="${campo.nombre}" value="${esc(o.valor)}"
+          ${elegidos.has(o.valor) && !o.bloqueado ? "checked" : ""} ${o.bloqueado ? "disabled" : ""} ${!varias && campo.requerido ? "required" : ""} />
+        <span class="principal"><strong>${esc(o.texto)}</strong>${o.detalle ? `<span>${esc(o.detalle)}</span>` : ""}</span>
+        <span class="motivo">${esc(o.bloqueado ?? "")}</span>
+      </label>`;
+    }).join("");
+    const buscador = campo.buscable
+      ? `<label class="buscador buscador-chico">${icono("buscar")}<input type="search" class="buscar-opciones" placeholder="${esc(campo.textoBuscar ?? "Buscar…")}" aria-label="Buscar en ${esc(campo.etiqueta)}" /></label>`
+      : "";
+    return `<fieldset class="${clase} campo-checks${enLinea}"${grupo}><legend>${esc(campo.etiqueta)}</legend>${buscador}
+      <div class="lista-opciones">${opciones || `<span class="ayuda">${esc(campo.textoVacio ?? "No hay opciones")}</span>`}</div>${ayuda}</fieldset>`;
   }
   if (campo.tipo === "select") {
     const opciones = campo.opciones
       .map((o) => `<option value="${esc(o.valor)}" ${o.valor === valor ? "selected" : ""}>${esc(o.texto)}</option>`)
       .join("");
     const vacia = campo.textoVacio ?? "Seleccione…";
-    return `<div class="${clase}"><label for="${id}">${esc(campo.etiqueta)}</label>
+    return `<div class="${clase}"${grupo}><label for="${id}">${esc(campo.etiqueta)}</label>
       <select id="${id}" name="${campo.nombre}" ${atributos}>${vacia ? `<option value="">${esc(vacia)}</option>` : ""}${opciones}</select>${ayuda}</div>`;
   }
   if (campo.tipo === "textarea") {
-    return `<div class="${clase}"><label for="${id}">${esc(campo.etiqueta)}</label>
+    return `<div class="${clase}"${grupo}><label for="${id}">${esc(campo.etiqueta)}</label>
       <textarea id="${id}" name="${campo.nombre}" ${atributos}>${esc(valor)}</textarea>${ayuda}</div>`;
   }
-  return `<div class="${clase}"><label for="${id}">${esc(campo.etiqueta)}</label>
+  return `<div class="${clase}"${grupo}><label for="${id}">${esc(campo.etiqueta)}</label>
     <input id="${id}" name="${campo.nombre}" type="${campo.tipo ?? "text"}" value="${esc(valor)}" ${atributos} />${ayuda}</div>`;
 }
 
@@ -320,8 +340,14 @@ function leerFormulario(formulario, campos) {
       datos[campo.nombre] = [...marcados].map((casilla) => Number(casilla.value));
       continue;
     }
+    if (campo.tipo === "radios") {
+      const marcado = formulario.querySelector(`input[name="${campo.nombre}"]:checked`);
+      datos[campo.nombre] = !marcado ? null : campo.numerico === false ? marcado.value : Number(marcado.value);
+      continue;
+    }
     const control = formulario.elements[campo.nombre];
-    if (campo.tipo === "checkbox") datos[campo.nombre] = control.checked;
+    if (control.disabled) datos[campo.nombre] = null; // campo de un grupo oculto
+    else if (campo.tipo === "checkbox") datos[campo.nombre] = control.checked;
     else if (control.value.trim() === "") datos[campo.nombre] = null;
     else if (campo.tipo === "number" || (campo.tipo === "select" && campo.numerico !== false)) datos[campo.nombre] = Number(control.value);
     else datos[campo.nombre] = campo.tipo === "password" ? control.value : control.value.trim();
@@ -333,7 +359,9 @@ function leerFormulario(formulario, campos) {
 function formularioValido(formulario, error) {
   if (formulario.checkValidity()) return true;
   const invalido = formulario.querySelector(":invalid");
-  error.textContent = `${invalido.labels?.[0]?.textContent ?? "Un campo"}: ${invalido.validationMessage}`;
+  // En una lista de opciones el nombre del campo es la leyenda, no el texto de la opción
+  const nombre = invalido.closest("fieldset")?.querySelector("legend")?.textContent ?? invalido.labels?.[0]?.textContent;
+  error.textContent = `${nombre ?? "Un campo"}: ${invalido.validationMessage}`;
   invalido.focus();
   return false;
 }
@@ -354,6 +382,16 @@ function abrirFormulario({ titulo, subtitulo, campos, valores = {}, textoBoton =
     </form>`, (raiz) => {
     const formulario = $("#formulario-dialogo", raiz);
     formulario.querySelector("input, select, textarea")?.focus();
+    // Buscadores de las listas de opciones: ocultan lo que no coincide (Enter no envía el formulario)
+    formulario.querySelectorAll(".buscar-opciones").forEach((buscador) => {
+      buscador.addEventListener("keydown", (e) => { if (e.key === "Enter") e.preventDefault(); });
+      buscador.addEventListener("input", () => {
+        const termino = buscador.value.trim().toLowerCase();
+        buscador.closest("fieldset").querySelectorAll(".opcion").forEach((opcion) => {
+          opcion.hidden = Boolean(termino) && !opcion.dataset.texto.includes(termino);
+        });
+      });
+    });
     formulario.addEventListener("submit", async (evento) => {
       evento.preventDefault();
       const error = $("#error-formulario", raiz);
@@ -387,7 +425,7 @@ const opcionesCategoria = Object.entries(CATEGORIAS).map(([valor, c]) => ({ valo
 
 const MODULOS = {
   clientes: {
-    ruta: "/clientes", singular: "cliente",
+    ruta: "/clientes", singular: "cliente", editaSoloAdmin: true,
     columnas: [
       { titulo: "Nombre", valor: (c) => `<strong>${esc(c.nombre)}</strong>` },
       { titulo: "Teléfono", valor: (c) => `<span class="mono">${esc(c.telefono)}</span>` },
@@ -403,7 +441,7 @@ const MODULOS = {
     ],
   },
   vehiculos: {
-    ruta: "/vehiculos", singular: "vehículo",
+    ruta: "/vehiculos", singular: "vehículo", editaSoloAdmin: true,
     accionExtra: { icono: "reloj", etiqueta: "Historial del vehículo", hacer: (v) => abrirHistorialVehiculo(v) },
     columnas: [
       { titulo: "Placa", valor: (v) => `<span class="placa">${esc(v.placa)}</span>` },
@@ -465,7 +503,7 @@ const MODULOS = {
     nombre: (r) => r.nombre,
     campos: () => [
       { nombre: "nombre", etiqueta: "Nombre", requerido: true, minlength: 2, maxlength: 100, completo: true },
-      { nombre: "precio", etiqueta: "Precio (L)", tipo: "number", requerido: true, min: 0.01, paso: 0.01 },
+      { nombre: "precio", etiqueta: "Precio (L)", tipo: "number", requerido: true, min: 1, paso: 1 },
       { nombre: "existencia", etiqueta: "Existencia", tipo: "number", requerido: true, min: 0, paso: 1, porDefecto: 0 },
     ],
   },
@@ -505,6 +543,8 @@ function pintarModulo(clave) {
   const modulo = MODULOS[clave];
   const termino = estado.busqueda.toLowerCase();
   const filas = estado.datos[clave].filter((item) => modulo.texto(item).toLowerCase().includes(termino));
+  // Clientes y vehículos: recepción los registra, pero solo la administración los edita o elimina
+  const puedeCambiar = !modulo.editaSoloAdmin || estado.yo.rol === "administrador";
 
   $("#vista").innerHTML = `
     <section class="panel">
@@ -522,8 +562,8 @@ function pintarModulo(clave) {
             ${modulo.columnas.map((c) => `<td class="${c.clase ?? ""}">${c.valor(item)}</td>`).join("")}
             <td class="acciones-fila">
               ${modulo.accionExtra ? `<button type="button" class="boton boton-icono" data-extra="${item.id}" aria-label="${esc(modulo.accionExtra.etiqueta)}" title="${esc(modulo.accionExtra.etiqueta)}">${icono(modulo.accionExtra.icono)}</button>` : ""}
-              ${modulo.sinEditar ? "" : `<button type="button" class="boton boton-icono" data-editar="${item.id}" aria-label="Editar">${icono("editar")}</button>`}
-              <button type="button" class="boton boton-icono peligro" data-eliminar="${item.id}" aria-label="Eliminar">${icono("borrar")}</button>
+              ${modulo.sinEditar || !puedeCambiar ? "" : `<button type="button" class="boton boton-icono" data-editar="${item.id}" aria-label="Editar">${icono("editar")}</button>`}
+              ${puedeCambiar ? `<button type="button" class="boton boton-icono peligro" data-eliminar="${item.id}" aria-label="Eliminar">${icono("borrar")}</button>` : ""}
             </td>
           </tr>`).join("")}
         </tbody>
@@ -649,11 +689,35 @@ function conectarTarjetasOrden() {
   );
 }
 
+/** Mecánicos que ya trabajan en un proyecto activo: Map(mecanico_id → orden_id). */
+function mecanicosOcupados(excluirOrdenId) {
+  const ocupados = new Map();
+  for (const o of estado.datos.ordenes) {
+    if (!ESTADOS_EDITABLES.includes(o.estado) || o.id === excluirOrdenId) continue;
+    for (const id of [o.mecanico_id, ...o.equipo]) if (!ocupados.has(id)) ocupados.set(id, o.id);
+  }
+  return ocupados;
+}
+
 function camposOrden(orden) {
-  // De más fama a menos: el primero es el líder sugerido
-  const porFama = [...estado.datos.mecanicos].sort((a, b) => b.creditos - a.creditos);
-  const mecanicos = porFama.filter((m) => m.activo || m.id === orden?.mecanico_id);
-  const disponibles = porFama.filter((m) => m.activo || orden?.equipo.includes(m.id));
+  // De más fama a menos; los que ya están en otro proyecto activo aparecen como no disponibles
+  const ocupados = mecanicosOcupados(orden?.id);
+  const yaEstan = new Set(orden ? [orden.mecanico_id, ...orden.equipo] : []);
+  const porFama = [...estado.datos.mecanicos]
+    .filter((m) => m.activo || yaEstan.has(m.id))
+    .sort((a, b) => b.creditos - a.creditos);
+  const motivo = (m) => {
+    if (yaEstan.has(m.id)) return null;
+    if (!m.activo) return "Inactivo";
+    return ocupados.has(m.id) ? `No disponible · proyecto #${ocupados.get(m.id)}` : null;
+  };
+  const opcion = (m) => ({
+    valor: m.id,
+    texto: m.nombre,
+    detalle: `${m.nivel} · ${m.creditos} créditos · ${m.especialidad || "Sin especialidad"}`,
+    bloqueado: motivo(m),
+    datos: { creditos: m.creditos, actual: yaEstan.has(m.id) ? "1" : "" },
+  });
   return [
     {
       nombre: "vehiculo_id", etiqueta: "Vehículo", tipo: "select", requerido: true, completo: true,
@@ -663,21 +727,17 @@ function camposOrden(orden) {
       })),
     },
     {
-      nombre: "mecanico_id", etiqueta: "Líder del trabajo", tipo: "select", requerido: true, completo: true,
-      opciones: mecanicos.map((m, i) => ({
-        valor: m.id,
-        texto: `${m.nombre} · ${m.nivel} (${m.creditos} cr.)${i === 0 && m.activo ? " · más fama" : ""}${m.activo ? "" : " (inactivo)"}`,
-      })),
-      porDefecto: mecanicos.find((m) => m.activo)?.id,
-      ayuda: "Normalmente el de más fama. Debe tener nivel para el auto: Técnico para Premium, Maestro para Lujo",
+      nombre: "mecanico_id", etiqueta: "Líder", tipo: "radios", requerido: true, completo: true, buscable: true,
+      textoBuscar: "Buscar al líder…", opciones: porFama.map(opcion),
+      ayuda: "Ordenados de más a menos fama. Debe tener nivel para el auto: Técnico para Premium, Maestro para Lujo",
     },
     {
-      nombre: "equipo", etiqueta: "Equipo (además del líder)", tipo: "checks", completo: true,
-      opciones: disponibles.map((m) => ({ valor: m.id, texto: `${m.nombre} · ${m.nivel}` })),
+      nombre: "equipo", etiqueta: "Acompañantes", tipo: "checks", completo: true, buscable: true,
+      textoBuscar: "Buscar acompañantes…", opciones: porFama.map(opcion),
       ayuda: "Ven el trabajo; el líder les asigna tareas, los califica y puede reportarlos",
     },
     { nombre: "fecha_ingreso", etiqueta: "Fecha de ingreso", tipo: "date", requerido: true, max: hoy(), porDefecto: hoy() },
-    { nombre: "mano_obra", etiqueta: "Mano de obra (L)", tipo: "number", min: 0, paso: 0.01, porDefecto: 0 },
+    { nombre: "mano_obra", etiqueta: "Mano de obra (L)", tipo: "number", min: 0, paso: 1, porDefecto: 0 },
     { nombre: "diagnostico", etiqueta: "Problema", tipo: "textarea", maxlength: 300, completo: true, ayuda: "Qué le pasa al vehículo y qué hay que revisar" },
     { nombre: "indicaciones", etiqueta: "Indicaciones del cliente", tipo: "textarea", maxlength: 300, completo: true, ayuda: "Datos relevantes del cliente; los mecánicos también los ven" },
   ];
@@ -693,7 +753,7 @@ function formularioOrden(orden) {
     subtitulo: orden ? "" : "El proyecto empieza en estado «Recibido» y le llega al líder y a su equipo",
     campos: camposOrden(orden),
     valores: orden ?? {},
-    textoBoton: orden ? "Guardar cambios" : "Crear orden",
+    textoBoton: orden ? "Guardar cambios" : "Crear proyecto",
     enviar: async (datos) => {
       datos.mano_obra ??= 0;
       // Si el líder quedó marcado también en el equipo, se quita de ahí
@@ -703,17 +763,33 @@ function formularioOrden(orden) {
     },
   });
 
-  // El líder elegido no se puede marcar también como miembro del equipo
-  const lider = $("#campo-mecanico_id", dialogo);
-  const sincronizarEquipo = () =>
-    dialogo.querySelectorAll('input[name="equipo"]').forEach((casilla) => {
-      const esLider = casilla.value === lider.value;
-      casilla.disabled = esLider;
-      if (esLider) casilla.checked = false;
-      casilla.closest(".check").classList.toggle("deshabilitado", esLider);
+  // Al elegir el auto se bloquea a quien no tiene nivel para su categoría,
+  // y el líder elegido no puede marcarse también como acompañante
+  const vehiculo = $("#campo-vehiculo_id", dialogo);
+  const bloquear = (opcion, motivo) => {
+    const casilla = opcion.querySelector("input");
+    casilla.disabled = Boolean(motivo);
+    if (motivo) casilla.checked = false;
+    opcion.classList.toggle("bloqueada", Boolean(motivo));
+    opcion.querySelector(".motivo").textContent = motivo;
+  };
+  const sincronizar = () => {
+    const auto = porId(estado.datos.vehiculos, Number(vehiculo.value));
+    dialogo.querySelectorAll('input[name="mecanico_id"]').forEach((radio) => {
+      const opcion = radio.closest(".opcion");
+      if (opcion.dataset.bloqueado || opcion.dataset.actual) return;
+      const sinNivel = auto && !puedeTrabajar(Number(opcion.dataset.creditos), auto.categoria);
+      bloquear(opcion, sinNivel ? `Le falta nivel para ${CATEGORIAS[auto.categoria].nombre}` : "");
     });
-  lider.addEventListener("change", sincronizarEquipo);
-  sincronizarEquipo();
+    const lider = dialogo.querySelector('input[name="mecanico_id"]:checked')?.value;
+    dialogo.querySelectorAll('input[name="equipo"]').forEach((casilla) => {
+      const opcion = casilla.closest(".opcion");
+      if (!opcion.dataset.bloqueado) bloquear(opcion, casilla.value === lider ? "Es el líder" : "");
+    });
+  };
+  vehiculo.addEventListener("change", sincronizar);
+  dialogo.querySelectorAll('input[name="mecanico_id"]').forEach((radio) => radio.addEventListener("change", sincronizar));
+  sincronizar();
 }
 
 /** Pide la calificación del trabajo antes de entregar. Resuelve con la clave elegida o "". */
@@ -786,11 +862,14 @@ async function abrirOrden(id) {
               const m = porId(estado.datos.mecanicos, mid);
               return `<span class="chip-equipo"><span class="avatar">${esc(iniciales(m?.nombre))}</span>${esc(m?.nombre ?? "—")}</span>`;
             }).join("")}</div>`
-          : `<span>Solo el líder</span>`}</div>
+          : `<span>Solo el líder</span>`}
+          <button type="button" class="boton boton-secundario boton-chico boton-mensaje-equipo" id="mensaje-equipo">${icono("enviar")} Mensaje al equipo</button></div>
         <div class="dato completo"><small>Problema</small><strong>${esc(orden.diagnostico || "Sin descripción")}</strong></div>
         ${orden.indicaciones ? `<div class="dato completo"><small>Indicaciones del cliente</small><strong>${esc(orden.indicaciones)}</strong></div>` : ""}
-        ${orden.calificacion ? `<div class="dato completo"><small>Calificación del trabajo</small>${insigniaCalificacion(orden.calificacion)}</div>` : ""}
+        ${orden.calificacion ? `<div class="dato completo"><small>Calificación del líder</small>${insigniaCalificacion(orden.calificacion)}</div>` : ""}
       </div>
+
+      ${listaNovedades(estado.datos.notificaciones.filter((n) => n.orden_id === orden.id && n.tipo !== "reporte").reverse())}
 
       <h3 class="seccion-titulo">Repuestos usados <span class="conteo">${lineas.length}</span></h3>
       ${lineas.length ? `
@@ -828,6 +907,9 @@ async function abrirOrden(id) {
       ${siguiente ? `<button type="button" class="boton boton-primario" id="avanzar-orden">${siguiente.clave === "entregado" ? "Calificar y entregar" : `Pasar a «${siguiente.nombre}»`} ${icono("flecha")}</button>` : ""}
     </div>`, (raiz) => {
     $("#cobrar-orden", raiz)?.addEventListener("click", () => registrarPago(cobro));
+    $("#mensaje-equipo", raiz)?.addEventListener("click", () =>
+      nuevoMensaje({ mecanico_ids: [orden.mecanico_id, ...orden.equipo], orden_id: orden.id })
+    );
     $("#avanzar-orden", raiz)?.addEventListener("click", async () => {
       let datos;
       if (siguiente.clave === "entregado") {
@@ -882,26 +964,214 @@ const ESTADOS_PAGO = {
   pagado: { nombre: "Pagado", clase: "insignia-ok" },
 };
 const METODOS_PAGO = { efectivo: "Efectivo", tarjeta: "Tarjeta", transferencia: "Transferencia" };
+const TIPOS_PAGO = { pago: { nombre: "Pago", clase: "insignia-ok" }, anticipo: { nombre: "Anticipo", clase: "insignia-premium" } };
+const MARCAS_TARJETA = ["Visa", "Mastercard", "American Express", "Otra"];
+const BANCOS = ["Banco Atlántida", "BAC Credomatic", "Banpaís", "Ficohsa", "Banco de Occidente", "Davivienda", "Banrural", "Otro"];
 const insigniaPago = (clave) => `<span class="insignia ${ESTADOS_PAGO[clave].clase}">${ESTADOS_PAGO[clave].nombre}</span>`;
+const insigniaTipoPago = (clave) => `<span class="insignia ${TIPOS_PAGO[clave].clase}">${TIPOS_PAGO[clave].nombre}</span>`;
 
+/** Separa «Ana María Paz Díaz» en nombres y apellidos para precargar los datos de quien paga. */
+function separarNombre(nombre = "") {
+  const partes = nombre.trim().split(/\s+/).filter(Boolean);
+  const corte = partes.length >= 4 ? 2 : 1;
+  return { pagador_nombres: partes.slice(0, corte).join(" "), pagador_apellidos: partes.slice(corte).join(" ") };
+}
+
+/** Datos de la persona que paga: se piden en cada pago, anticipo y venta. */
+function camposPagador() {
+  return [
+    { nombre: "pagador_nombres", etiqueta: "Nombres de quien paga", requerido: true, minlength: 2, maxlength: 60, autocompletar: "off" },
+    { nombre: "pagador_apellidos", etiqueta: "Apellidos", requerido: true, minlength: 2, maxlength: 60, autocompletar: "off" },
+    {
+      nombre: "pagador_identidad", etiqueta: "Identidad (ID)", requerido: true, minlength: 5, maxlength: 20, patron: "[0-9A-Za-z\\-]+",
+      autocompletar: "off", ayuda: "DNI 0801-1990-12345, RTN o pasaporte",
+    },
+    { nombre: "pagador_correo", etiqueta: "Correo", tipo: "email", maxlength: 100, autocompletar: "off", ayuda: "Opcional, para enviarle el comprobante" },
+  ];
+}
+
+/** Forma de pago y, según la que se elija, los datos de la tarjeta o de la transferencia. */
+function camposMetodo() {
+  return [
+    {
+      nombre: "metodo", etiqueta: "Forma de pago", tipo: "radios", numerico: false, requerido: true, completo: true, enLinea: true, porDefecto: "efectivo",
+      opciones: [
+        { valor: "efectivo", texto: "Efectivo", detalle: "En caja" },
+        { valor: "tarjeta", texto: "Tarjeta", detalle: "Crédito o débito (POS)" },
+        { valor: "transferencia", texto: "Transferencia", detalle: "Depósito o banca en línea" },
+      ],
+    },
+    {
+      nombre: "tarjeta_marca", etiqueta: "Marca de la tarjeta", tipo: "select", numerico: false, requerido: true, grupo: "tarjeta",
+      opciones: MARCAS_TARJETA.map((m) => ({ valor: m, texto: m })),
+    },
+    {
+      nombre: "tarjeta_ultimos4", etiqueta: "Últimos 4 dígitos", requerido: true, minlength: 4, maxlength: 4, patron: "\\d{4}", teclado: "numeric",
+      autocompletar: "off", grupo: "tarjeta", ayuda: "Nunca el número completo ni el código de seguridad",
+    },
+    { nombre: "tarjeta_titular", etiqueta: "Titular de la tarjeta", maxlength: 100, autocompletar: "off", grupo: "tarjeta", ayuda: "Opcional, si no es quien paga" },
+    { nombre: "autorizacion", etiqueta: "Número de autorización", requerido: true, maxlength: 20, autocompletar: "off", grupo: "tarjeta", ayuda: "Aparece en el voucher del POS" },
+    {
+      nombre: "banco", etiqueta: "Banco", tipo: "select", numerico: false, requerido: true, grupo: "transferencia",
+      opciones: BANCOS.map((b) => ({ valor: b, texto: b })),
+    },
+    { nombre: "referencia", etiqueta: "Número de referencia", requerido: true, maxlength: 60, autocompletar: "off", grupo: "transferencia" },
+  ];
+}
+
+/** Muestra solo los campos de la forma de pago elegida; los ocultos se desactivan y no se envían. */
+function conectarMetodoDePago(raiz) {
+  const sincronizar = () => {
+    const metodo = raiz.querySelector('input[name="metodo"]:checked')?.value;
+    raiz.querySelectorAll("[data-grupo]").forEach((caja) => {
+      const visible = caja.dataset.grupo === metodo;
+      caja.hidden = !visible;
+      caja.querySelectorAll("input, select, textarea").forEach((control) => (control.disabled = !visible));
+    });
+  };
+  raiz.querySelectorAll('input[name="metodo"]').forEach((radio) => radio.addEventListener("change", sincronizar));
+  sincronizar();
+}
+
+/** Texto corto de la forma de pago: «Visa •••• 4821 · aut. 458712», «BAC Credomatic · ref. TRF-55». */
+function detalleMetodo(p) {
+  if (p.metodo === "tarjeta") {
+    return `<div class="celda-doble"><strong>${esc(p.tarjeta_marca ?? "Tarjeta")} <span class="mono">•••• ${esc(p.tarjeta_ultimos4 ?? "")}</span></strong>
+      <span>aut. <span class="mono">${esc(p.autorizacion ?? "—")}</span>${p.tarjeta_titular ? ` · ${esc(p.tarjeta_titular)}` : ""}</span></div>`;
+  }
+  if (p.metodo === "transferencia") {
+    return `<div class="celda-doble"><strong>Transferencia</strong><span>${esc(p.banco ?? "")}${p.referencia ? ` · ref. <span class="mono">${esc(p.referencia)}</span>` : ""}</span></div>`;
+  }
+  return `<div class="celda-doble"><strong>${esc(METODOS_PAGO[p.metodo])}</strong>${p.referencia ? `<span class="mono">${esc(p.referencia)}</span>` : ""}</div>`;
+}
+
+const quienPago = (p) => p.pagador_nombres
+  ? `<div class="celda-doble"><strong>${esc(p.pagador_nombres)} ${esc(p.pagador_apellidos ?? "")}</strong><span class="mono">${esc(p.pagador_identidad ?? "")}</span>${p.pagador_correo ? `<span>${esc(p.pagador_correo)}</span>` : ""}</div>`
+  : `<span class="texto-tenue">—</span>`;
+
+/** Ventana de cobro: primero se elige si se paga un producto suelto o un trabajo del taller. */
+async function elegirTipoDePago() {
+  const respuesta = await preguntar(`
+    <div class="dialogo-encabezado"><div><h2>¿Qué se va a pagar?</h2><p>Elija el tipo de cobro</p></div></div>
+    <div class="dialogo-cuerpo"><div class="opciones-cobro">
+      <button type="button" class="opcion-cobro" data-respuesta="producto">${icono("repuestos")}<strong>Producto individual</strong><span>Venta de un repuesto suelto del almacén</span></button>
+      <button type="button" class="opcion-cobro" data-respuesta="trabajo">${icono("ordenes")}<strong>Trabajo de taller</strong><span>Pago o anticipo de un proyecto (servicio)</span></button>
+    </div></div>
+    <div class="dialogo-pie"><button type="button" class="boton boton-secundario" data-respuesta="">Cancelar</button></div>`);
+  if (respuesta === "producto") formularioVenta();
+  else if (respuesta === "trabajo") registrarPago();
+}
+
+/** Pago o anticipo de un proyecto. Sin `cobro`, primero se elige el proyecto entre los que tienen saldo. */
 function registrarPago(cobro) {
+  const conSaldo = estado.datos.cobros.filter((c) => c.saldo > 0);
+  if (!cobro && !conSaldo.length) {
+    aviso("No hay proyectos con saldo pendiente", "error");
+    return;
+  }
+  const sinAnticipo = (c) => (c && !ESTADOS_EDITABLES.includes(c.estado) ? "El trabajo ya está terminado: solo pagos" : "");
+  const resumen = (c) => (c ? `Total ${dinero(c.total)} · pagado ${dinero(c.pagado)} · saldo ${dinero(c.saldo)}` : "Elija un proyecto");
+  const campos = [
+    ...(cobro ? [] : [{
+      nombre: "orden_id", etiqueta: "Proyecto a cobrar", tipo: "radios", requerido: true, completo: true, buscable: true,
+      textoBuscar: "Buscar por número, placa o cliente…",
+      opciones: conSaldo.map((c) => ({
+        valor: c.id, texto: `#${c.id} · ${c.placa} · ${c.marca} ${c.modelo}`,
+        detalle: `${c.cliente} · ${nombreEstado(c.estado)} · saldo ${dinero(c.saldo)}`,
+      })),
+    }]),
+    {
+      nombre: "tipo", etiqueta: "Tipo de pago", tipo: "radios", numerico: false, requerido: true, completo: true, enLinea: true, porDefecto: "pago",
+      opciones: [
+        { valor: "pago", texto: "Pago", detalle: "Abono o pago final del trabajo" },
+        { valor: "anticipo", texto: "Pago anticipado", detalle: "Adelanto antes de que el trabajo esté listo", bloqueado: sinAnticipo(cobro) || undefined },
+      ],
+    },
+    {
+      // En lempiras enteros; solo si un saldo viejo tiene centavos se aceptan decimales para cerrarlo
+      nombre: "monto", etiqueta: "Monto (L)", tipo: "number", requerido: true, completo: true, min: 1, paso: 1,
+      ...(cobro ? { min: Math.min(1, cobro.saldo), max: cobro.saldo, paso: Number.isInteger(cobro.saldo) ? 1 : "any", porDefecto: cobro.saldo } : {}),
+      ayuda: resumen(cobro),
+    },
+    ...camposPagador(),
+    ...camposMetodo(),
+  ];
   abrirFormulario({
-    titulo: `Cobrar proyecto #${cobro.id}`,
-    subtitulo: `${cobro.cliente} · total ${dinero(cobro.total)} · saldo ${dinero(cobro.saldo)}`,
-    campos: [
-      { nombre: "monto", etiqueta: "Monto (L)", tipo: "number", requerido: true, min: 0.01, max: cobro.saldo, paso: 0.01, porDefecto: cobro.saldo, ayuda: "Puede ser un pago parcial o un anticipo" },
-      {
-        nombre: "metodo", etiqueta: "Forma de pago", tipo: "select", numerico: false, requerido: true, textoVacio: "",
-        opciones: Object.entries(METODOS_PAGO).map(([valor, texto]) => ({ valor, texto })), porDefecto: "efectivo",
-      },
-      { nombre: "referencia", etiqueta: "Referencia", maxlength: 60, completo: true, ayuda: "Número de voucher o transferencia (opcional)" },
-    ],
+    titulo: cobro ? `Cobrar proyecto #${cobro.id}` : "Cobro de trabajo de taller",
+    subtitulo: cobro ? `${cobro.cliente} · ${cobro.placa} ${cobro.marca} ${cobro.modelo}` : "Pago o anticipo de un proyecto",
+    campos,
+    valores: cobro ? separarNombre(cobro.cliente) : {},
     textoBoton: "Registrar pago",
-    enviar: async (datos) => {
-      const resultado = await api(`/ordenes/${cobro.id}/pagos`, { metodo: "POST", datos });
-      aviso(resultado.saldo > 0 ? `Pago registrado. Queda ${dinero(resultado.saldo)}` : "Proyecto pagado por completo");
+    enviar: async ({ orden_id, ...datos }) => {
+      const resultado = await api(`/ordenes/${orden_id ?? cobro.id}/pagos`, { metodo: "POST", datos });
+      const tipo = datos.tipo === "anticipo" ? "Anticipo registrado" : "Pago registrado";
+      aviso(resultado.saldo > 0 ? `${tipo}. Queda ${dinero(resultado.saldo)}` : "Proyecto pagado por completo");
     },
   });
+  conectarMetodoDePago(dialogo);
+
+  // Al elegir el proyecto se ajustan el monto, el anticipo y los datos de quien paga
+  const monto = $("#campo-monto", dialogo);
+  const ayudaMonto = monto.parentElement.querySelector(".ayuda");
+  const anticipo = dialogo.querySelector('input[name="tipo"][value="anticipo"]');
+  let precargado = cobro ? separarNombre(cobro.cliente) : {};
+  dialogo.querySelectorAll('input[name="orden_id"]').forEach((radio) => radio.addEventListener("change", () => {
+    const elegido = porId(conSaldo, Number(radio.value));
+    Object.assign(monto, { min: Math.min(1, elegido.saldo), max: elegido.saldo, step: Number.isInteger(elegido.saldo) ? 1 : "any", value: elegido.saldo });
+    ayudaMonto.textContent = resumen(elegido);
+    const motivo = sinAnticipo(elegido);
+    anticipo.disabled = Boolean(motivo);
+    if (motivo && anticipo.checked) dialogo.querySelector('input[name="tipo"][value="pago"]').checked = true;
+    anticipo.closest(".opcion").classList.toggle("bloqueada", Boolean(motivo));
+    anticipo.closest(".opcion").querySelector(".motivo").textContent = motivo;
+    // El nombre del cliente se precarga, pero no se pisa lo que ya escribió recepción
+    const nuevo = separarNombre(elegido.cliente);
+    for (const [clave, valor] of Object.entries(nuevo)) {
+      const control = dialogo.querySelector(`[name="${clave}"]`);
+      if (!control.value || control.value === precargado[clave]) control.value = valor;
+    }
+    precargado = nuevo;
+  }));
+}
+
+/** Venta de un repuesto suelto (producto individual), sin proyecto de taller. */
+function formularioVenta() {
+  const disponibles = estado.datos.repuestos.filter((r) => r.existencia > 0);
+  if (!disponibles.length) {
+    aviso("No hay repuestos con existencia para vender", "error");
+    return;
+  }
+  abrirFormulario({
+    titulo: "Venta de producto individual",
+    subtitulo: "Repuesto suelto, sin proyecto de taller · se descuenta del almacén",
+    campos: [
+      {
+        nombre: "repuesto_id", etiqueta: "Repuesto", tipo: "radios", requerido: true, completo: true, buscable: true, textoBuscar: "Buscar repuesto…",
+        opciones: disponibles.map((r) => ({ valor: r.id, texto: r.nombre, detalle: `${dinero(r.precio)} c/u · quedan ${r.existencia}` })),
+      },
+      { nombre: "cantidad", etiqueta: "Cantidad", tipo: "number", requerido: true, completo: true, min: 1, max: 100, paso: 1, porDefecto: 1, ayuda: "Elija un repuesto" },
+      ...camposPagador(),
+      ...camposMetodo(),
+    ],
+    textoBoton: "Registrar venta",
+    enviar: async (datos) => {
+      const venta = await api("/ventas", { metodo: "POST", datos });
+      aviso(`Venta registrada: ${venta.repuesto} × ${venta.cantidad} = ${dinero(venta.total)}`);
+    },
+  });
+  conectarMetodoDePago(dialogo);
+
+  // Total en vivo y tope de la cantidad según lo que queda en el almacén
+  const cantidad = $("#campo-cantidad", dialogo);
+  const ayuda = cantidad.parentElement.querySelector(".ayuda");
+  const actualizar = () => {
+    const elegido = porId(disponibles, Number(dialogo.querySelector('input[name="repuesto_id"]:checked')?.value));
+    if (!elegido) return;
+    cantidad.max = Math.min(100, elegido.existencia);
+    ayuda.textContent = `Total: ${dinero(elegido.precio * (Number(cantidad.value) || 0))} · quedan ${elegido.existencia}`;
+  };
+  dialogo.querySelectorAll('input[name="repuesto_id"]').forEach((radio) => radio.addEventListener("change", actualizar));
+  cantidad.addEventListener("input", actualizar);
 }
 
 async function verPagos(ordenId) {
@@ -912,9 +1182,9 @@ async function verPagos(ordenId) {
     ${encabezadoDialogo(`Pagos del proyecto #${cobro.id}`, `${esc(cobro.cliente)} · <span class="placa">${esc(cobro.placa)}</span>`)}
     <div class="dialogo-cuerpo">
       ${cobro.pagos.length ? `<div class="tabla-repuestos tabla-contenedor"><table>
-        <thead><tr><th>Fecha</th><th>Forma</th><th>Referencia</th><th>Registró</th><th class="numero">Monto</th>${puedeAnular ? "<th></th>" : ""}</tr></thead>
-        <tbody>${cobro.pagos.map((p) => `<tr><td>${fechaHora(p.fecha)}</td><td>${esc(METODOS_PAGO[p.metodo])}</td>
-          <td class="mono">${esc(p.referencia || "—")}</td><td>${esc(p.registrado_por || "—")}</td><td class="numero">${dinero(p.monto)}</td>
+        <thead><tr><th>Fecha</th><th>Tipo</th><th>Pagó</th><th>Forma</th><th>Registró</th><th class="numero">Monto</th>${puedeAnular ? "<th></th>" : ""}</tr></thead>
+        <tbody>${cobro.pagos.map((p) => `<tr><td>${fechaHora(p.fecha)}</td><td>${insigniaTipoPago(p.tipo)}</td><td>${quienPago(p)}</td>
+          <td>${detalleMetodo(p)}</td><td>${esc(p.registrado_por || "—")}</td><td class="numero">${dinero(p.monto)}</td>
           ${puedeAnular ? `<td class="acciones-fila"><button type="button" class="boton boton-icono peligro" data-anular="${p.id}" aria-label="Anular pago">${icono("borrar")}</button></td>` : ""}</tr>`).join("")}
         </tbody></table></div>` : `<p class="vacio-chico" style="padding-left:0">Todavía no hay pagos.</p>`}
       <div class="totales">
@@ -941,8 +1211,20 @@ async function verPagos(ordenId) {
   });
 }
 
+function tablaVentas(ventas) {
+  return ventas.length ? `<div class="tabla-contenedor"><table>
+    <thead><tr><th>Fecha</th><th>Repuesto</th><th class="numero">Cantidad</th><th>Pagó</th><th>Forma</th><th>Registró</th><th class="numero">Total</th></tr></thead>
+    <tbody>${ventas.map((v) => `<tr>
+      <td>${fechaHora(v.fecha)}</td>
+      <td><div class="celda-doble"><strong>${esc(v.repuesto)}</strong><span>${dinero(v.precio_unitario)} c/u</span></div></td>
+      <td class="numero">${v.cantidad}</td><td>${quienPago(v)}</td><td>${detalleMetodo(v)}</td>
+      <td>${esc(v.registrado_por || "—")}</td><td class="numero"><strong>${dinero(v.total)}</strong></td></tr>`).join("")}
+    </tbody></table></div>`
+    : `<div class="vacio">${icono("repuestos")}<strong>Sin ventas todavía</strong><span>Use «Registrar pago» → «Producto individual» para vender un repuesto suelto.</span></div>`;
+}
+
 function pintarCobros() {
-  const { cobros } = estado.datos;
+  const { cobros, ventas } = estado.datos;
   const filtro = estado.filtroCobros ?? "saldo";
   const conSaldo = cobros.filter((c) => c.saldo > 0);
   const visibles = filtro === "saldo" ? conSaldo : filtro === "pagado" ? cobros.filter((c) => c.estado_pago === "pagado") : cobros;
@@ -951,19 +1233,19 @@ function pintarCobros() {
   $("#vista").innerHTML = `
     <div class="estadisticas">
       <div class="panel estadistica alerta"><span class="etiqueta">${icono("dinero")} Por cobrar</span><span class="valor">${dinero(suma(conSaldo, "saldo"))}</span><span class="detalle">${conSaldo.length} proyectos con saldo</span></div>
-      <div class="panel estadistica"><span class="etiqueta">${icono("check")} Cobrado</span><span class="valor">${dinero(suma(cobros, "pagado"))}</span><span class="detalle">en todos los proyectos</span></div>
+      <div class="panel estadistica"><span class="etiqueta">${icono("check")} Cobrado en trabajos</span><span class="valor">${dinero(suma(cobros, "pagado"))}</span><span class="detalle">pagos y anticipos de proyectos</span></div>
+      <div class="panel estadistica"><span class="etiqueta">${icono("repuestos")} Ventas de repuestos</span><span class="valor">${dinero(suma(ventas, "total"))}</span><span class="detalle">${ventas.length === 1 ? "1 venta" : `${ventas.length} ventas`} de producto individual</span></div>
       <div class="panel estadistica"><span class="etiqueta">${icono("alerta")} Listos sin pagar</span><span class="valor">${conSaldo.filter((c) => c.estado === "listo").length}</span><span class="detalle">el cliente debe pagar al retirar</span></div>
-      <div class="panel estadistica"><span class="etiqueta">${icono("ordenes")} Entregados con saldo</span><span class="valor">${conSaldo.filter((c) => c.estado === "entregado").length}</span><span class="detalle">cuentas por cobrar</span></div>
     </div>
     <section class="panel">
       <div class="barra-herramientas">
         <div class="pestanas-filtro" role="tablist">
-          ${[["saldo", "Con saldo"], ["pagado", "Pagados"], ["todos", "Todos"]].map(([clave, texto]) =>
+          ${[["saldo", "Con saldo"], ["pagado", "Pagados"], ["todos", "Todos"], ["ventas", "Ventas de repuestos"]].map(([clave, texto]) =>
             `<button type="button" class="pestana-filtro ${clave === filtro ? "activa" : ""}" data-filtro="${clave}">${texto}</button>`).join("")}
         </div>
-        <span class="conteo">${visibles.length} proyectos</span>
+        <span class="conteo">${filtro === "ventas" ? `${ventas.length} ventas` : `${visibles.length} proyectos`}</span>
       </div>
-      ${visibles.length ? `<div class="tabla-contenedor"><table>
+      ${filtro === "ventas" ? tablaVentas(ventas) : visibles.length ? `<div class="tabla-contenedor"><table>
         <thead><tr><th>Proyecto</th><th>Cliente</th><th>Estado</th><th class="numero">Total</th><th class="numero">Pagado</th><th class="numero">Saldo</th><th>Pago</th><th></th></tr></thead>
         <tbody>${visibles.map((c) => `<tr>
           <td><div class="celda-doble"><strong>#${c.id} <span class="placa">${esc(c.placa)}</span></strong><span>${esc(c.marca)} ${esc(c.modelo)}</span></div></td>
@@ -1051,13 +1333,58 @@ async function abrirHistorialVehiculo(vehiculo) {
   });
 }
 
+/** «Problemas que surgieron»: avisos del equipo durante el trabajo y la nota final al terminar. */
+function listaNovedades(novedades) {
+  return `<h3 class="seccion-titulo">Problemas que surgieron <span class="conteo">${novedades.length}</span></h3>
+    ${novedades.length ? `<ul class="lista-novedades">${novedades.map((n) => `
+      <li class="${n.tipo === "listo" ? "final" : ""}"><span class="punto-novedad"></span>
+        <div><strong>${esc(n.mensaje)}</strong><span>${esc(n.mecanico ?? "—")} · ${fechaHora(n.fecha)}${n.tipo === "listo" ? " · al terminar" : ""}</span></div></li>`).join("")}</ul>`
+      : `<p class="vacio-chico" style="padding-left:0">El equipo no ha reportado problemas en este trabajo.</p>`}`;
+}
+
+// ===================== Recepción: mensajes a los mecánicos =====================
+function nuevoMensaje(valores = {}) {
+  const activos = estado.datos.mecanicos.filter((m) => m.activo).sort((a, b) => a.nombre.localeCompare(b.nombre));
+  const ocupados = mecanicosOcupados();
+  abrirFormulario({
+    titulo: "Mensaje a los mecánicos",
+    subtitulo: "Les llega a la bandeja de su área",
+    valores,
+    campos: [
+      {
+        nombre: "mecanico_ids", etiqueta: "Para", tipo: "checks", completo: true, buscable: true, textoBuscar: "Buscar mecánico…",
+        opciones: activos.map((m) => ({
+          valor: m.id, texto: m.nombre,
+          detalle: `${m.nivel}${ocupados.has(m.id) ? ` · en el proyecto #${ocupados.get(m.id)}` : " · sin proyecto activo"}`,
+        })),
+      },
+      { nombre: "asunto", etiqueta: "Asunto", requerido: true, minlength: 3, maxlength: 100, completo: true },
+      { nombre: "texto", etiqueta: "Mensaje", tipo: "textarea", requerido: true, minlength: 3, maxlength: 1000, completo: true },
+      {
+        nombre: "orden_id", etiqueta: "Proyecto relacionado", tipo: "select", textoVacio: "Ninguno", completo: true,
+        opciones: estado.datos.ordenes.filter((o) => o.estado !== "entregado").map((o) => ({
+          valor: o.id, texto: `#${o.id} · ${porId(estado.datos.vehiculos, o.vehiculo_id)?.placa ?? ""} · ${nombreEstado(o.estado)}`,
+        })),
+      },
+    ],
+    textoBoton: "Enviar mensaje",
+    enviar: async (datos) => {
+      if (!datos.mecanico_ids.length) throw new Error("Elija al menos un mecánico");
+      const enviados = await api("/mensajes", { metodo: "POST", datos });
+      aviso(enviados.length === 1 ? `Mensaje enviado a ${enviados[0].mecanico}` : `Mensaje enviado a ${enviados.length} mecánicos`);
+    },
+  });
+}
+
 // ===================== Recepción: bandeja =====================
 const PESTANAS_BANDEJA = [
   { clave: "peticiones", titulo: "Peticiones de material", cuenta: () => estado.datos.peticiones.filter((p) => p.estado === "pendiente").length },
   { clave: "reportes", titulo: "Reportes", cuenta: () => estado.datos.reportesTaller.filter((r) => r.estado === "abierto").length },
   { clave: "avisos", titulo: "Avisos", cuenta: () => estado.datos.notificaciones.filter((n) => !n.leida).length },
+  { clave: "mensajes", titulo: "Mensajes", cuenta: () => mensajesSinLeer().length },
 ];
 const TIPO_AVISO = { listo: ["Trabajo listo", "insignia-ok"], avance: ["Avance", "insignia-premium"], reporte: ["Reporte", "insignia-peligro"] };
+const mensajesSinLeer = () => estado.datos.mensajes.filter((m) => m.direccion === "a_recepcion" && !m.leido);
 const pendientesBandeja = () => PESTANAS_BANDEJA.reduce((total, p) => total + p.cuenta(), 0);
 
 function pintarBandeja() {
@@ -1077,7 +1404,7 @@ function pintarBandeja() {
           <span class="texto-tenue de-quien">${esc(p.mecanico)} · ${fechaHora(p.fecha)}</span>
           <div class="acciones-tarjeta">
             <button type="button" class="boton boton-secundario boton-chico" data-rechazar="${p.id}">Rechazar</button>
-            <button type="button" class="boton boton-primario boton-chico" data-enviar="${p.id}" ${p.existencia < p.cantidad ? "disabled" : ""}>${icono("enviar")} Enviar material</button>
+            <button type="button" class="boton boton-primario boton-chico" data-enviar="${p.id}" ${p.existencia < p.cantidad ? "disabled" : ""} title="Se descuenta del almacén y llega al proyecto">${icono("enviar")} Aceptar y enviar</button>
           </div>
         </article>`).join("")}</div>` : `<div class="panel vacio">${icono("check")}<strong>Sin peticiones pendientes</strong><span>Cuando un mecánico pida material aparecerá aquí.</span></div>`}
       ${respondidas.length ? `<section class="panel"><div class="panel-encabezado"><h2>Respondidas</h2></div><ul class="lista">${respondidas.map((p) => `
@@ -1099,8 +1426,37 @@ function pintarBandeja() {
           ${r.sobre_mecanico ? `<span class="sobre">Sobre <strong>${esc(r.sobre_mecanico)}</strong></span>` : ""}
           <p>${esc(r.descripcion)}</p>
           <span class="texto-tenue de-quien">${esc(r.mecanico)} · ${fechaHora(r.fecha)}${r.orden_id ? ` · proyecto #${r.orden_id}` : ""}</span>
-          ${r.estado === "abierto" ? `<div class="acciones-tarjeta"><button type="button" class="boton boton-secundario boton-chico" data-resolver="${r.id}">${icono("check")} Marcar resuelto</button></div>` : ""}
+          ${r.estado === "resuelto" && r.sobre_mecanico ? `<span class="resultado-reporte">${r.penalizacion ? `Se le bajaron <strong class="negativo">${r.penalizacion} créditos</strong>` : "Sin bajar créditos"}${r.comentario ? ` · «${esc(r.comentario)}»` : ""}</span>` : ""}
+          ${r.estado === "abierto" ? `<div class="acciones-tarjeta"><button type="button" class="boton boton-secundario boton-chico" data-resolver="${r.id}">${icono("check")} ${r.sobre_mecanico ? "Resolver y decidir créditos" : "Marcar resuelto"}</button></div>` : ""}
         </article>`).join("")}</div>` : `<div class="panel vacio">${icono("reporte")}<strong>Sin reportes abiertos</strong><span>Los reportes de los mecánicos y de los líderes llegan aquí.</span></div>`}`;
+  } else if (pestana === "mensajes") {
+    // «Recibidos»: lo que escriben los mecánicos con proyecto activo; «Enviados»: lo que manda recepción
+    const caja = estado.cajaMensajes ?? "recibidos";
+    const lista = estado.datos.mensajes.filter((m) => m.direccion === (caja === "recibidos" ? "a_recepcion" : "a_mecanico"));
+    const sinLeer = mensajesSinLeer().length;
+    contenido = `
+      <section class="panel">
+        <div class="panel-encabezado">
+          <div class="pestanas-filtro" role="tablist">
+            <button type="button" class="pestana-filtro ${caja === "recibidos" ? "activa" : ""}" data-caja="recibidos">Recibidos${sinLeer ? ` <span class="contador-pestana">${sinLeer}</span>` : ""}</button>
+            <button type="button" class="pestana-filtro ${caja === "enviados" ? "activa" : ""}" data-caja="enviados">Enviados</button>
+          </div>
+          <button type="button" class="boton boton-primario boton-chico" id="nuevo-mensaje">${icono("mas")} Nuevo mensaje</button></div>
+        ${lista.length ? `<ul class="lista">${lista.map((m) => caja === "recibidos" ? `
+          <li class="${m.leido ? "" : "no-leida"}"><div class="fila-lista fila-mensaje"><span class="avatar">${esc(iniciales(m.mecanico))}</span>
+            <span class="principal"><strong>${esc(m.asunto)}</strong><span>De ${esc(m.mecanico)} · ${fechaHora(m.fecha)}${m.orden_id ? ` · proyecto #${m.orden_id}` : ""}</span>
+              <span class="texto-mensaje">${esc(m.texto)}</span></span>
+            <span class="acciones-mensaje">
+              ${m.orden_id ? `<button type="button" class="boton boton-icono" data-ver-proyecto="${m.orden_id}" aria-label="Ver proyecto" title="Ver proyecto">${icono("ordenes")}</button>` : ""}
+              <button type="button" class="boton boton-icono" data-responder="${m.id}" aria-label="Responder" title="Responder">${icono("enviar")}</button>
+              ${m.leido ? "" : `<button type="button" class="boton boton-icono" data-mensaje-leido="${m.id}" aria-label="Marcar como leído" title="Marcar como leído">${icono("check")}</button>`}
+            </span></div></li>` : `
+          <li><div class="fila-lista fila-mensaje"><span class="avatar">${esc(iniciales(m.mecanico))}</span>
+            <span class="principal"><strong>${esc(m.asunto)}</strong><span>Para ${esc(m.mecanico)} · ${fechaHora(m.fecha)}${m.orden_id ? ` · proyecto #${m.orden_id}` : ""}</span>
+              <span class="texto-mensaje">${esc(m.texto)}</span></span>
+            <span class="insignia ${m.leido ? "insignia-ok" : "insignia-neutra"}">${m.leido ? "Leído" : "Sin leer"}</span></div></li>`).join("")}</ul>`
+          : `<p class="vacio-chico">${caja === "recibidos" ? "Los mecánicos con un proyecto activo pueden escribirle desde su bandeja." : "Todavía no ha enviado mensajes."}</p>`}
+      </section>`;
   } else {
     const avisos = estado.datos.notificaciones;
     contenido = `
@@ -1144,10 +1500,45 @@ function pintarBandeja() {
     }
   });
   accion("[data-resolver]", async (b) => {
-    if (await intentar(() => api(`/reportes/${b.dataset.resolver}/resolver`, { metodo: "POST" }))) {
-      aviso("Reporte resuelto");
-      await refrescar();
+    const reporte = porId(estado.datos.reportesTaller, Number(b.dataset.resolver));
+    if (!reporte.sobre_mecanico) {
+      if (await intentar(() => api(`/reportes/${reporte.id}/resolver`, { metodo: "POST" }))) {
+        aviso("Reporte resuelto");
+        await refrescar();
+      }
+      return;
     }
+    // Reporte del líder: recepción decide cuánto bajarle la fama al reportado, y se lo envía
+    abrirFormulario({
+      titulo: `Reporte sobre ${reporte.sobre_mecanico}`,
+      subtitulo: `«${reporte.titulo}»: ${reporte.descripcion}`,
+      campos: [
+        {
+          nombre: "penalizacion", etiqueta: "Créditos a bajar", tipo: "number", requerido: true, min: 0, max: 100, paso: 1, porDefecto: 0,
+          ayuda: "Números enteros de 0 a 100, según la gravedad de lo que describe el líder. 0 para no bajar.",
+        },
+        { nombre: "comentario", etiqueta: "Comentario para el mecánico", tipo: "textarea", maxlength: 300, completo: true },
+      ],
+      textoBoton: "Resolver y enviarle el reporte",
+      enviar: async (datos) => {
+        datos.penalizacion ??= 0;
+        await api(`/reportes/${reporte.id}/resolver`, { metodo: "POST", datos });
+        aviso(datos.penalizacion
+          ? `${reporte.sobre_mecanico} pierde ${datos.penalizacion} créditos; el reporte le llegó a su bandeja`
+          : `Reporte resuelto; le llegó a la bandeja de ${reporte.sobre_mecanico}`);
+      },
+    });
+  });
+  $("#nuevo-mensaje")?.addEventListener("click", () => nuevoMensaje());
+  accion("[data-caja]", (b) => { estado.cajaMensajes = b.dataset.caja; pintarBandeja(); });
+  accion("[data-mensaje-leido]", async (b) => {
+    if (await intentar(() => api(`/mensajes/${b.dataset.mensajeLeido}/leido`, { metodo: "POST" }))) await refrescar();
+  });
+  accion("[data-responder]", async (b) => {
+    const m = porId(estado.datos.mensajes, Number(b.dataset.responder));
+    if (!m.leido) await intentar(() => api(`/mensajes/${m.id}/leido`, { metodo: "POST" }));
+    const asunto = m.asunto.startsWith("Re: ") ? m.asunto : `Re: ${m.asunto}`;
+    nuevoMensaje({ mecanico_ids: [m.mecanico_id], asunto: asunto.slice(0, 100), orden_id: m.orden_id });
   });
   accion("[data-leida]", async (b) => {
     if (await intentar(() => api(`/notificaciones/${b.dataset.leida}/leida`, { metodo: "POST" }))) await refrescar();
@@ -1182,14 +1573,128 @@ confirmacion.addEventListener("click", (evento) => {
   }
 });
 
+// ===================== Recepción: historial de movimientos =====================
+const TIPOS_MOVIMIENTO = {
+  pago: ["Pago", "insignia-ok"],
+  anticipo: ["Anticipo", "insignia-premium"],
+  pago_anulado: ["Pago anulado", "insignia-peligro"],
+  venta: ["Venta", "insignia-lujo"],
+  solicitud_aceptada: ["Solicitud aceptada", "insignia-ok"],
+  repuesto_usado: ["Repuesto usado", "insignia-baja"],
+  repuesto_devuelto: ["Repuesto devuelto", "insignia-neutra"],
+};
+const FILTROS_MOVIMIENTO = [
+  { clave: "todos", texto: "Todos", tipos: null },
+  { clave: "pagos", texto: "Pagos", tipos: ["pago", "anticipo", "pago_anulado", "venta"] },
+  { clave: "solicitudes", texto: "Solicitudes aceptadas", tipos: ["solicitud_aceptada"] },
+  { clave: "repuestos", texto: "Repuestos vendidos o usados", tipos: ["venta", "repuesto_usado", "repuesto_devuelto"] },
+];
+
+function pintarMovimientos() {
+  const todos = estado.datos.movimientos;
+  const filtro = FILTROS_MOVIMIENTO.find((f) => f.clave === (estado.filtroMovimientos ?? "todos"));
+  const termino = estado.busqueda.toLowerCase();
+  const lista = todos.filter((m) => (!filtro.tipos || filtro.tipos.includes(m.tipo))
+    && `${m.descripcion} ${m.repuesto ?? ""} ${m.usuario ?? ""} ${m.orden_id ?? ""} ${TIPOS_MOVIMIENTO[m.tipo][0]}`.toLowerCase().includes(termino));
+  const de = (...tipos) => todos.filter((m) => tipos.includes(m.tipo));
+  const sumar = (movs, campo) => movs.reduce((total, m) => total + (m[campo] ?? 0), 0);
+  // Las devoluciones restan de lo usado
+  const usados = sumar(de("repuesto_usado"), "cantidad") - sumar(de("repuesto_devuelto"), "cantidad");
+
+  $("#vista").innerHTML = `
+    <div class="estadisticas">
+      <div class="panel estadistica"><span class="etiqueta">${icono("dinero")} Total cobrado</span><span class="valor">${dinero(sumar(de("pago", "anticipo", "pago_anulado", "venta"), "monto"))}</span><span class="detalle">pagos, anticipos y ventas (menos anulados)</span></div>
+      <div class="panel estadistica"><span class="etiqueta">${icono("repuestos")} Repuestos vendidos</span><span class="valor">${sumar(de("venta"), "cantidad")}</span><span class="detalle">${de("venta").length === 1 ? "1 venta" : `${de("venta").length} ventas`} de producto individual</span></div>
+      <div class="panel estadistica"><span class="etiqueta">${icono("mecanicos")} Repuestos usados</span><span class="valor">${usados}</span><span class="detalle">en proyectos de taller</span></div>
+      <div class="panel estadistica"><span class="etiqueta">${icono("enviar")} Solicitudes aceptadas</span><span class="valor">${de("solicitud_aceptada").length}</span><span class="detalle">material enviado a los equipos</span></div>
+    </div>
+    <section class="panel">
+      <div class="barra-herramientas">
+        <div class="pestanas-filtro" role="tablist">
+          ${FILTROS_MOVIMIENTO.map((f) => `<button type="button" class="pestana-filtro ${f === filtro ? "activa" : ""}" data-filtro="${f.clave}">${f.texto}</button>`).join("")}
+        </div>
+        <label class="buscador">${icono("buscar")}
+          <input id="busqueda" type="search" placeholder="Buscar movimiento…" value="${esc(estado.busqueda)}" aria-label="Buscar" />
+        </label>
+        <span class="conteo">${lista.length} de ${todos.length}</span>
+      </div>
+      ${lista.length ? `<div class="tabla-contenedor"><table>
+        <thead><tr><th>Fecha</th><th>Tipo</th><th class="col-descripcion">Descripción</th><th>Proyecto</th><th class="numero">Cantidad</th><th class="numero">Monto</th><th>Usuario</th></tr></thead>
+        <tbody>${lista.map((m) => `<tr>
+          <td class="sin-saltos">${fechaHora(m.fecha)}</td>
+          <td><span class="insignia ${TIPOS_MOVIMIENTO[m.tipo][1]}">${TIPOS_MOVIMIENTO[m.tipo][0]}</span></td>
+          <td class="col-descripcion">${esc(m.descripcion)}</td>
+          <td>${m.orden_id ? `<button type="button" class="enlace" data-ver-proyecto="${m.orden_id}">#${m.orden_id}</button>` : `<span class="texto-tenue">—</span>`}</td>
+          <td class="numero">${m.cantidad ?? "—"}</td>
+          <td class="numero ${m.monto < 0 ? "negativo" : ""}">${m.monto == null ? "—" : dinero(m.monto)}</td>
+          <td>${esc(m.usuario || "—")}</td></tr>`).join("")}
+        </tbody></table></div>`
+        : `<div class="vacio">${icono("reloj")}<strong>${termino ? "Sin resultados" : "Sin movimientos"}</strong><span>${termino ? "Pruebe con otra búsqueda." : "Aquí aparecen los pagos, las ventas, las solicitudes aceptadas y los repuestos usados."}</span></div>`}
+    </section>`;
+
+  conectarBusqueda();
+  $("#vista").querySelectorAll("[data-filtro]").forEach((b) =>
+    b.addEventListener("click", () => { estado.filtroMovimientos = b.dataset.filtro; pintarMovimientos(); })
+  );
+  $("#vista").querySelectorAll("[data-ver-proyecto]").forEach((b) =>
+    b.addEventListener("click", () => abrirOrden(Number(b.dataset.verProyecto)))
+  );
+}
+
 // ===================== Recepción: puntuaciones =====================
+/** Tarjeta de un proyecto culminado: lo que el líder dio a su equipo y los botones para calificar al líder. */
+function tarjetaCulminado(o) {
+  const v = porId(estado.datos.vehiculos, o.vehiculo_id);
+  const lider = porId(estado.datos.mecanicos, o.mecanico_id);
+  const categoria = v?.categoria ?? "estandar";
+  const cobro = porId(estado.datos.cobros, o.id);
+  return `
+    <article class="panel tarjeta-culminado">
+      <div class="arriba"><span class="placa">${esc(v?.placa ?? "—")}</span>${insigniaCategoria(categoria)}<span class="numero-orden">Proyecto #${o.id}</span></div>
+      <strong class="vehiculo">${esc(textoVehiculo(v))}</strong>
+      <span class="texto-tenue">${esc(o.diagnostico || "Sin descripción")}</span>
+      <div class="lider-culminado"><span class="avatar">${esc(iniciales(lider?.nombre))}</span>
+        <div class="principal"><small>Líder</small><strong>${esc(lider?.nombre ?? "—")}</strong></div>
+        ${lider ? insigniaNivel(lider.creditos) : ""}</div>
+      <h3 class="seccion-titulo">Resultados que dio el líder</h3>
+      <div id="resultados-${o.id}"><p class="vacio-chico" style="padding-left:0">Cargando…</p></div>
+      ${cobro?.saldo > 0 ? `<p class="aviso-saldo">${icono("alerta")} El cliente todavía debe ${dinero(cobro.saldo)}.</p>` : ""}
+      <h3 class="seccion-titulo">Calificar al líder</h3>
+      <div class="botones-calificar">${CALIFICACIONES.map((c) => {
+        const puntos = puntosPor(c.clave, categoria);
+        return `<button type="button" class="boton-calificar ${puntos > 0 ? "positivo" : "negativo"}" data-calificar-lider="${o.id}" data-calificacion="${esc(c.clave)}">
+          <strong>${esc(c.nombre)}</strong><span>${conSigno(puntos)} créditos</span></button>`;
+      }).join("")}</div>
+    </article>`;
+}
+
+async function pintarResultadosLider(orden) {
+  const equipo = await intentar(() => api(`/ordenes/${orden.id}/equipo`));
+  const caja = $(`#resultados-${orden.id}`);
+  if (!equipo || !caja) return;
+  const acompanantes = equipo.filter((m) => !m.es_lider);
+  caja.innerHTML = acompanantes.length
+    ? `<ul class="resultados-lider">${acompanantes.map((m) => `
+        <li><span class="avatar">${esc(iniciales(m.nombre))}</span>
+          <span class="principal"><strong>${esc(m.nombre)}</strong><span>${m.tarea ? `Tarea: ${esc(m.tarea)}` : "Sin tarea asignada"}</span></span>
+          ${m.calificacion ? insigniaCalificacion(m.calificacion) : `<span class="insignia insignia-neutra">Sin calificar</span>`}</li>`).join("")}</ul>`
+    : `<p class="vacio-chico" style="padding-left:0">Trabajó solo, sin acompañantes.</p>`;
+}
+
 function pintarPuntuaciones() {
   const { mecanicos, ordenes } = estado.datos;
-  const porCalificar = ordenes.filter((o) => o.estado === "listo");
+  // Solo aparecen los líderes que culminaron su proyecto (listo para entregar)
+  const culminados = ordenes.filter((o) => o.estado === "listo");
   const ranking = mecanicos.filter((m) => m.activo).sort((a, b) => b.creditos - a.creditos);
   const participa = (m, o) => o.mecanico_id === m.id || o.equipo.includes(m.id);
 
   $("#vista").innerHTML = `
+    <section class="seccion-culminados">
+      <div class="encabezado-seccion"><h2>Líderes que culminaron un proyecto</h2><span class="conteo">${culminados.length}</span></div>
+      <p class="texto-tenue">Revise lo que cada líder dio a sus acompañantes y califique al líder. Al calificarlo, el proyecto queda entregado.</p>
+      ${culminados.length ? `<div class="rejilla-culminados">${culminados.map(tarjetaCulminado).join("")}</div>`
+        : `<div class="panel vacio">${icono("estrella")}<strong>Nada por calificar</strong><span>Cuando un líder marque su proyecto como listo aparecerá aquí.</span></div>`}
+    </section>
     <div class="rejilla-resumen">
       <section class="panel">
         <div class="panel-encabezado"><h2>Ranking de mecánicos</h2><span class="conteo">por créditos</span></div>
@@ -1207,27 +1712,31 @@ function pintarPuntuaciones() {
             </td></tr>`).join("")}
           </tbody></table></div>
       </section>
-      <div class="columna">
-        <section class="panel">
-          <div class="panel-encabezado"><h2>Listos para calificar</h2><span class="conteo">${porCalificar.length}</span></div>
-          ${porCalificar.length ? `<ul class="lista">${porCalificar.map((o) => {
-            const v = porId(estado.datos.vehiculos, o.vehiculo_id);
-            const lider = porId(mecanicos, o.mecanico_id);
-            return `<li><button type="button" class="fila-lista" data-calificar="${o.id}">
-              <span class="placa">${esc(v?.placa ?? "—")}</span>
-              <span class="principal"><strong>Proyecto #${o.id}</strong><span>Líder ${esc(lider?.nombre ?? "—")}${o.equipo.length ? ` + ${o.equipo.length}` : ""}</span></span>
-              <span class="insignia insignia-lujo">${icono("estrella")}Calificar</span></button></li>`;
-          }).join("")}</ul>` : `<p class="vacio-chico">No hay proyectos listos esperando calificación.</p>`}
-        </section>
-        <section class="panel panel-cuerpo nota-puntos">
-          <h2>Cómo se puntúa</h2>
-          <p>Al entregar un proyecto, recepción lo califica: el líder gana o pierde esos créditos y su equipo la mitad, más la mitad según su líder. Con <strong>Ajustar</strong> puede subir o bajar créditos a mano por algo puntual (horas extra, una falta), con un motivo que el mecánico verá en su historial.</p>
-        </section>
-      </div>
+      <section class="panel panel-cuerpo nota-puntos">
+        <h2>Cómo se puntúa</h2>
+        <p>Recepción califica al <strong>líder</strong>: Excelente, Bueno, Con fallas o Requiere retrabajo. El líder gana o pierde esos créditos. Cada acompañante recibe la mitad de eso y la otra mitad según lo calificó su líder.</p>
+        <p>Con <strong>Ajustar</strong> puede subir o bajar créditos a mano (números enteros) por algo puntual, con un motivo que el mecánico verá en su historial. Los reportes de los líderes se resuelven en la Bandeja.</p>
+      </section>
     </div>`;
 
+  culminados.forEach(pintarResultadosLider);
   const vista = $("#vista");
-  vista.querySelectorAll("[data-calificar]").forEach((b) => b.addEventListener("click", () => abrirOrden(Number(b.dataset.calificar))));
+  vista.querySelectorAll("[data-calificar-lider]").forEach((b) => b.addEventListener("click", async () => {
+    const orden = porId(ordenes, Number(b.dataset.calificarLider));
+    const lider = porId(mecanicos, orden.mecanico_id);
+    const calificacion = CALIFICACIONES.find((c) => c.clave === b.dataset.calificacion);
+    const categoria = porId(estado.datos.vehiculos, orden.vehiculo_id)?.categoria ?? "estandar";
+    const puntos = puntosPor(calificacion.clave, categoria);
+    const seguro = await confirmar({
+      titulo: `¿Calificar «${calificacion.nombre}» a ${lider?.nombre ?? "el líder"}?`,
+      texto: `${conSigno(puntos)} créditos para el líder. El proyecto #${orden.id} quedará entregado y ya no se podrá cambiar.`,
+      boton: "Calificar y entregar",
+    });
+    if (seguro && (await intentar(() => api(`/ordenes/${orden.id}/avanzar`, { metodo: "POST", datos: { calificacion: calificacion.clave } })))) {
+      aviso(`Proyecto #${orden.id} entregado: ${lider?.nombre ?? "el líder"} ${conSigno(puntos)} créditos`);
+      await refrescar();
+    }
+  }));
   vista.querySelectorAll("[data-ajustar]").forEach((b) => b.addEventListener("click", () => {
     const m = porId(mecanicos, Number(b.dataset.ajustar));
     const proyectos = ordenes.filter((o) => participa(m, o)).sort((a, c) => c.id - a.id);
@@ -1491,12 +2000,16 @@ async function abrirTrabajo(id) {
       <div class="pasos">${ESTADOS.map((e, i) =>
         `<span class="paso ${i < posicion ? "hecho" : ""} ${i === posicion ? "actual" : ""}">${e.nombre}</span>`).join("")}
       </div>
+      <h3 class="seccion-titulo">Descripción del proyecto</h3>
       <div class="datos-orden">
-        <div class="dato"><small>Vehículo</small><strong>${esc(trabajo.marca)} ${esc(trabajo.modelo)} ${trabajo.anio}</strong>${insigniaCategoria(trabajo.categoria)}</div>
-        <div class="dato"><small>Cliente</small><strong>${esc(trabajo.cliente)}</strong></div>
-        <div class="dato completo"><small>Problema</small><strong>${esc(trabajo.diagnostico || "Sin descripción")}</strong></div>
+        <div class="dato"><small>Vehículo</small><strong>${esc(trabajo.marca)} ${esc(trabajo.modelo)} ${trabajo.anio}</strong>
+          <span class="mono">${esc(trabajo.placa)}</span> ${insigniaCategoria(trabajo.categoria)}</div>
+        <div class="dato"><small>Cliente</small><strong>${esc(trabajo.cliente)}</strong><span>Líder: ${esc(trabajo.lider)}</span></div>
+        <div class="dato completo"><small>Lo que tiene el auto</small><strong>${esc(trabajo.diagnostico || "Sin descripción")}</strong></div>
         ${trabajo.indicaciones ? `<div class="dato completo dato-indicaciones"><small>Indicaciones del cliente</small><strong>${esc(trabajo.indicaciones)}</strong></div>` : ""}
       </div>
+
+      ${listaNovedades(trabajo.novedades)}
 
       <h3 class="seccion-titulo">Repuestos asignados <span class="conteo">${trabajo.repuestos.length}</span></h3>
       ${trabajo.repuestos.length
@@ -1596,6 +2109,74 @@ async function abrirTrabajo(id) {
         abrirTrabajo(id);
       }
     });
+  });
+}
+
+// ===================== Área del mecánico: bandeja =====================
+const trabajosActivos = () => estado.datos.trabajos.filter((t) => ESTADOS_EDITABLES.includes(t.estado));
+
+function pintarBandejaMecanico() {
+  const { mensajes } = estado.datos;
+  const sinLeer = mensajes.filter((m) => m.direccion === "a_mecanico" && !m.leido).length;
+  const puedeEscribir = trabajosActivos().length > 0;
+  $("#vista").innerHTML = `
+    <section class="panel">
+      <div class="panel-encabezado"><h2>Mensajes con recepción</h2>
+        <div class="acciones-encabezado">
+          ${sinLeer ? `<button type="button" class="boton boton-secundario boton-chico" id="leer-mensajes">Marcar todo como leído</button>` : ""}
+          <button type="button" class="boton boton-primario boton-chico" id="escribir-recepcion" ${puedeEscribir ? "" : "disabled"}
+            title="${puedeEscribir ? "Pida material, herramientas o avise algo" : "Solo con un proyecto activo"}">${icono("enviar")} Escribir a recepción</button>
+        </div></div>
+      ${puedeEscribir ? "" : `<p class="nota-bandeja">${icono("candado")} Podrá escribir a recepción cuando tenga un proyecto activo (recibido o en reparación).</p>`}
+      ${mensajes.length ? `<ul class="lista">${mensajes.map((m) => {
+        const propio = m.direccion === "a_recepcion";
+        return `
+        <li class="${propio || m.leido ? "" : "no-leida"} ${propio ? "mensaje-propio" : ""}"><div class="fila-lista fila-mensaje">
+          <span class="avatar">${icono(propio ? "enviar" : "bandeja")}</span>
+          <span class="principal"><strong>${esc(m.asunto)}</strong>
+            <span>${propio ? "Usted → Recepción" : `De ${esc(m.remitente)}`} · ${fechaHora(m.fecha)}${m.orden_id ? ` · proyecto #${m.orden_id}` : ""}</span>
+            <span class="texto-mensaje">${esc(m.texto)}</span></span>
+          <span class="acciones-mensaje">
+            ${m.orden_id && porId(estado.datos.trabajos, m.orden_id) ? `<button type="button" class="boton boton-icono" data-abrir-trabajo="${m.orden_id}" aria-label="Ver proyecto" title="Ver proyecto">${icono("ordenes")}</button>` : ""}
+            ${propio ? `<span class="insignia ${m.leido ? "insignia-ok" : "insignia-neutra"}">${m.leido ? "Leído" : "Enviado"}</span>`
+              : m.leido ? "" : `<button type="button" class="boton boton-icono" data-leido="${m.id}" aria-label="Marcar como leído" title="Marcar como leído">${icono("check")}</button>`}
+          </span></div></li>`;
+      }).join("")}</ul>`
+        : `<div class="vacio">${icono("bandeja")}<strong>Sin mensajes</strong><span>Aquí le llegan los mensajes de recepción y los reportes sobre su trabajo.</span></div>`}
+    </section>`;
+
+  $("#vista").querySelectorAll("[data-leido]").forEach((b) => b.addEventListener("click", async () => {
+    if (await intentar(() => api(`/mecanico/mensajes/${b.dataset.leido}/leido`, { metodo: "POST" }))) await refrescar();
+  }));
+  $("#vista").querySelectorAll("[data-abrir-trabajo]").forEach((b) =>
+    b.addEventListener("click", () => abrirTrabajo(Number(b.dataset.abrirTrabajo)))
+  );
+  $("#leer-mensajes")?.addEventListener("click", async () => {
+    if (await intentar(() => api("/mecanico/mensajes/leer-todos", { metodo: "POST" }))) await refrescar();
+  });
+  $("#escribir-recepcion")?.addEventListener("click", () => escribirARecepcion());
+}
+
+/** El mecánico con un proyecto activo le escribe a recepción (pedir cosas, avisar algo). */
+function escribirARecepcion() {
+  const activos = trabajosActivos();
+  abrirFormulario({
+    titulo: "Escribir a recepción",
+    subtitulo: "Pida material o herramientas, o avise algo del proyecto",
+    campos: [
+      {
+        nombre: "orden_id", etiqueta: "Proyecto", tipo: "select", completo: true, textoVacio: activos.length > 1 ? "Ninguno en especial" : "",
+        opciones: activos.map((t) => ({ valor: t.id, texto: `#${t.id} · ${t.placa} ${t.marca} ${t.modelo}` })),
+        porDefecto: activos.length === 1 ? activos[0].id : undefined,
+      },
+      { nombre: "asunto", etiqueta: "Asunto", requerido: true, minlength: 3, maxlength: 100, completo: true },
+      { nombre: "texto", etiqueta: "Mensaje", tipo: "textarea", requerido: true, minlength: 3, maxlength: 1000, completo: true },
+    ],
+    textoBoton: "Enviar a recepción",
+    enviar: async (datos) => {
+      await api("/mecanico/mensajes", { metodo: "POST", datos });
+      aviso("Mensaje enviado a recepción");
+    },
   });
 }
 
@@ -1790,10 +2371,11 @@ const VISTAS_PERSONAL = {
   resumen: { titulo: "Resumen", subtitulo: "Así está el taller hoy", icono: "resumen", pintar: pintarResumen },
   ordenes: { titulo: "Proyectos", subtitulo: "Proyectos de trabajo: vehículo, cliente, problema y equipo", icono: "ordenes", pintar: pintarOrdenes,
     boton: "Nuevo proyecto", nuevo: () => formularioOrden(), cuenta: () => ordenesActivas().length },
-  bandeja: { titulo: "Bandeja", subtitulo: "Peticiones, reportes y avisos de los mecánicos", icono: "bandeja", pintar: pintarBandeja,
+  bandeja: { titulo: "Bandeja", subtitulo: "Peticiones, reportes, avisos y mensajes de los mecánicos", icono: "bandeja", pintar: pintarBandeja,
     cuenta: () => pendientesBandeja() },
-  cobros: { titulo: "Cobros", subtitulo: "Pagos de los clientes y saldos pendientes", icono: "dinero", pintar: pintarCobros,
-    cuenta: () => estado.datos.cobros.filter((c) => c.saldo > 0).length },
+  cobros: { titulo: "Cobros", subtitulo: "Pagos y anticipos de trabajos, ventas de repuestos y saldos pendientes", icono: "dinero", pintar: pintarCobros,
+    boton: "Registrar pago", nuevo: () => elegirTipoDePago(), cuenta: () => estado.datos.cobros.filter((c) => c.saldo > 0).length },
+  movimientos: { titulo: "Movimientos", subtitulo: "Historial de pagos, solicitudes aceptadas y repuestos vendidos o usados", icono: "reloj", pintar: pintarMovimientos },
   repuestos: { titulo: "Almacén", subtitulo: "Inventario de repuestos; con «Enviar» se manda material a un proyecto", icono: "repuestos" },
   puntuaciones: { titulo: "Puntuaciones", subtitulo: "Créditos de los mecánicos y proyectos por calificar", icono: "estrella", pintar: pintarPuntuaciones,
     cuenta: () => estado.datos.ordenes.filter((o) => o.estado === "listo").length },
@@ -1812,6 +2394,8 @@ for (const clave of Object.keys(MODULOS)) {
 const VISTAS_MECANICO = {
   trabajos: { titulo: "Mis trabajos", subtitulo: "Vehículos que le asignó recepción", icono: "ordenes", pintar: pintarTrabajos,
     cuenta: () => estado.datos.trabajos.filter((t) => ESTADOS_EDITABLES.includes(t.estado)).length },
+  bandeja: { titulo: "Bandeja", subtitulo: "Mensajes con recepción", icono: "bandeja", pintar: pintarBandejaMecanico,
+    cuenta: () => estado.datos.mensajes.filter((m) => m.direccion === "a_mecanico" && !m.leido).length },
   reportes: { titulo: "Reportes", subtitulo: "Avise a recepción lo que pase con el equipo o el taller", icono: "reporte", pintar: pintarReportes,
     cuenta: () => estado.datos.reportes.filter((r) => r.estado === "abierto").length },
   perfil: { titulo: "Mi perfil", subtitulo: "Sus datos, su nivel y sus créditos", icono: "perfil", pintar: pintarPerfil },

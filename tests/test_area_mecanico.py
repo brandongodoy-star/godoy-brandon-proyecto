@@ -143,10 +143,13 @@ def test_el_nivel_limita_que_autos_se_le_asignan(cliente, recepcion, admin, entr
         assert r.status_code == 400
         assert "Aprendiz" in r.json()["detail"]
 
-    # Un Maestro (el mecánico 1 de los datos de prueba) sí puede trabajar autos de lujo
-    maestro = cliente.get("/mecanicos/1", headers=recepcion).json()
+    # Con los ajustes de recepción llega a Maestro y ya puede trabajar autos de lujo
+    for _ in range(3):
+        datos = {"puntos": 100, "motivo": "Experiencia comprobada"}
+        cliente.post(f"/mecanicos/{ficha['id']}/creditos", json=datos, headers=recepcion)
+    maestro = cliente.get(f"/mecanicos/{ficha['id']}", headers=recepcion).json()
     assert maestro["nivel"] == "Maestro"
-    nueva_orden(cliente, recepcion, 1, lujo["id"])
+    nueva_orden(cliente, recepcion, ficha["id"], lujo["id"])
 
 
 def test_conserva_trabajos_que_ya_tenia(cliente, recepcion, admin, entrar):
@@ -155,7 +158,8 @@ def test_conserva_trabajos_que_ya_tenia(cliente, recepcion, admin, entrar):
     orden = nueva_orden(cliente, recepcion, ficha["id"], vehiculo["id"])
     # El auto cambia a lujo después de asignado: la orden se puede seguir editando
     cambio = {k: vehiculo[k] for k in ("placa", "marca", "modelo", "anio", "cliente_id")}
-    cliente.put(f"/vehiculos/{vehiculo['id']}", json={**cambio, "categoria": "lujo"}, headers=recepcion)
+    r = cliente.put(f"/vehiculos/{vehiculo['id']}", json={**cambio, "categoria": "lujo"}, headers=admin)
+    assert r.status_code == 200
     datos = {"vehiculo_id": vehiculo["id"], "mecanico_id": ficha["id"], "diagnostico": "Actualizado"}
     assert cliente.put(f"/ordenes/{orden['id']}", json=datos, headers=recepcion).status_code == 200
 

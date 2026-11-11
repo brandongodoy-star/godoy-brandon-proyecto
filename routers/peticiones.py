@@ -18,9 +18,9 @@ def listar_peticiones(estado: Literal["pendiente", "enviada", "rechazada"] | Non
 
 
 @router.post("/{peticion_id}/enviar", response_model=PeticionRespuesta)
-def enviar_material(peticion_id: int):
+def enviar_material(peticion_id: int, usuario: dict = Depends(solo_personal)):
     with obtener_conexion() as con:
-        return RepositorioPeticion(con).enviar(peticion_id)
+        return RepositorioPeticion(con).enviar(peticion_id, usuario["username"])
 
 
 @router.post("/{peticion_id}/rechazar", response_model=PeticionRespuesta)

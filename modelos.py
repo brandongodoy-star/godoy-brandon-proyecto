@@ -1,7 +1,7 @@
 from datetime import date
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
 from creditos import nivel_de
 
@@ -290,6 +290,24 @@ class ReporteRespuesta(BaseModel):
     fecha: str
     sobre_mecanico_id: int | None = None
     sobre_mecanico: str | None = None
+    penalizacion: int | None = None
+    comentario: str | None = None
+
+
+class ResolverEntrada(Entrada):
+    """Al resolver el reporte de un líder, recepción decide cuántos créditos bajarle al reportado."""
+
+    penalizacion: int = Field(default=0, ge=0, le=100)
+    comentario: str | None = Field(default=None, max_length=300)
+
+
+class Novedad(BaseModel):
+    """Lo que el equipo avisó durante el trabajo: problemas que surgieron, avances y la nota final."""
+
+    tipo: Literal["listo", "avance", "reporte"]
+    mensaje: str
+    mecanico: str | None = None
+    fecha: str
 
 
 class PeticionRespuesta(BaseModel):
@@ -317,6 +335,7 @@ class TrabajoDetalle(Trabajo):
     puedo_dirigir: bool
     reportes_equipo: list[ReporteRespuesta]
     peticiones: list[PeticionRespuesta]
+    novedades: list[Novedad]
 
 
 class NotificacionRespuesta(BaseModel):
@@ -341,6 +360,36 @@ class RechazoEntrada(Entrada):
     respuesta: str = Field(min_length=3, max_length=200)
 
 
+# ---------- Mensajes de recepción a los mecánicos ----------
+class MensajeEntrada(Entrada):
+    mecanico_ids: list[Annotated[int, Field(gt=0)]] = Field(min_length=1, max_length=30)
+    asunto: str = Field(min_length=3, max_length=100)
+    texto: str = Field(min_length=3, max_length=1000)
+    orden_id: int | None = Field(default=None, gt=0)
+
+
+class MensajeARecepcion(Entrada):
+    """Lo que un mecánico con un proyecto activo le escribe a recepción (por ejemplo, para pedir algo)."""
+
+    asunto: str = Field(min_length=3, max_length=100)
+    texto: str = Field(min_length=3, max_length=1000)
+    orden_id: int | None = Field(default=None, gt=0)
+
+
+class MensajeMecanico(BaseModel):
+    id: int
+    mecanico_id: int
+    mecanico: str
+    remitente: str
+    asunto: str
+    texto: str
+    orden_id: int | None = None
+    leido: bool
+    fecha: str
+    # «a_mecanico»: lo envió recepción · «a_recepcion»: lo envió el mecánico
+    direccion: Literal["a_mecanico", "a_recepcion"]
+
+
 class RepuestoDisponible(BaseModel):
     """Lo que el mecánico ve del almacén para pedir material: sin precios."""
 
@@ -354,19 +403,113 @@ MetodoPago = Literal["efectivo", "tarjeta", "transferencia"]
 EstadoPago = Literal["pendiente", "parcial", "pagado"]
 
 
-class PagoEntrada(Entrada):
-    monto: float = Field(gt=0)
+MarcaTarjeta = Literal["Visa", "Mastercard", "American Express", "Otra"]
+CORREO = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
+# Identidad hondureña (0801-1990-12345), RTN o pasaporte: letras, números y guiones
+IDENTIDAD = r"^[0-9A-Za-z-]+$"
+
+
+class DatosDePago(Entrada):
+    """Quién paga y cómo. De la tarjeta solo se guardan la marca y los últimos 4 dígitos:
+    nunca el número completo ni el código de seguridad."""
+
     metodo: MetodoPago
+    pagador_nombres: str = Field(min_length=2, max_length=60)
+    pagador_apellidos: str = Field(min_length=2, max_length=60)
+    pagador_identidad: str = Field(min_length=5, max_length=20, pattern=IDENTIDAD)
+    pagador_correo: str | None = Field(default=None, max_length=100, pattern=CORREO)
+    tarjeta_marca: MarcaTarjeta | None = None
+    tarjeta_ultimos4: str | None = Field(default=None, pattern=r"^\d{4}$")
+    tarjeta_titular: str | None = Field(default=None, max_length=100)
+    autorizacion: str | None = Field(default=None, max_length=20)
+    banco: str | None = Field(default=None, max_length=60)
     referencia: str | None = Field(default=None, max_length=60)
 
+    @model_validator(mode="after")
+    def datos_segun_el_metodo(self):
+        if self.metodo == "tarjeta":
+            faltan = [
+                nombre
+                for nombre, valor in (
+                    ("la marca", self.tarjeta_marca),
+                    ("los últimos 4 dígitos", self.tarjeta_ultimos4),
+                    ("el número de autorización", self.autorizacion),
+                )
+                if not valor
+            ]
+            if faltan:
+                raise ValueError(f"Para pagar con tarjeta falta {', '.join(faltan)}")
+            self.banco = None
+        elif self.metodo == "transferencia":
+            if not self.banco or not self.referencia:
+                raise ValueError("Para una transferencia indique el banco y el número de referencia")
+            self.tarjeta_marca = self.tarjeta_ultimos4 = self.tarjeta_titular = self.autorizacion = None
+        else:
+            self.tarjeta_marca = self.tarjeta_ultimos4 = self.tarjeta_titular = self.autorizacion = None
+            self.banco = None
+        return self
 
-class PagoRespuesta(BaseModel):
+
+class PagoEntrada(DatosDePago):
+    monto: float = Field(gt=0)
+    # Un anticipo se paga antes de que el trabajo esté listo
+    tipo: Literal["pago", "anticipo"] = "pago"
+
+
+class VentaEntrada(DatosDePago):
+    """Venta de un repuesto suelto, sin proyecto de taller."""
+
+    repuesto_id: int = Field(gt=0)
+    cantidad: int = Field(gt=0, le=100)
+
+
+class DatosDePagoRespuesta(BaseModel):
+    metodo: MetodoPago
+    referencia: str | None = None
+    pagador_nombres: str | None = None
+    pagador_apellidos: str | None = None
+    pagador_identidad: str | None = None
+    pagador_correo: str | None = None
+    tarjeta_marca: str | None = None
+    tarjeta_ultimos4: str | None = None
+    tarjeta_titular: str | None = None
+    autorizacion: str | None = None
+    banco: str | None = None
+    registrado_por: str | None = None
+    fecha: str
+
+
+class PagoRespuesta(DatosDePagoRespuesta):
     id: int
     orden_id: int
     monto: float
-    metodo: MetodoPago
-    referencia: str | None = None
-    registrado_por: str | None = None
+    tipo: Literal["pago", "anticipo"]
+
+
+class VentaRespuesta(DatosDePagoRespuesta):
+    id: int
+    repuesto_id: int
+    repuesto: str
+    cantidad: int
+    precio_unitario: float
+    total: float
+
+
+TipoMovimiento = Literal[
+    "pago", "anticipo", "pago_anulado", "venta", "solicitud_aceptada", "repuesto_usado", "repuesto_devuelto"
+]
+
+
+class MovimientoRespuesta(BaseModel):
+    id: int
+    tipo: TipoMovimiento
+    descripcion: str
+    monto: float | None = None
+    cantidad: int | None = None
+    repuesto_id: int | None = None
+    repuesto: str | None = None
+    orden_id: int | None = None
+    usuario: str | None = None
     fecha: str
 
 

@@ -36,13 +36,15 @@ def test_base_nueva_carga_datos_de_prueba(ruta_bd):
     database.inicializar_bd()
     assert contar(ruta_bd, "clientes") == 10
     assert contar(ruta_bd, "vehiculos") == 12
-    assert contar(ruta_bd, "mecanicos") == 5
+    assert contar(ruta_bd, "mecanicos") == 8
     assert contar(ruta_bd, "repuestos") == 10
     assert contar(ruta_bd, "ordenes_servicio") == 11
     assert contar(ruta_bd, "detalle_orden") == 12
     assert contar(ruta_bd, "equipo_orden") == 4
     assert contar(ruta_bd, "pagos") == 4
     assert contar(ruta_bd, "peticiones") == 1
+    assert contar(ruta_bd, "mensajes") == 1
+    assert contar(ruta_bd, "movimientos") == 16  # 4 pagos y 12 repuestos usados
     assert version(ruta_bd) == database.VERSION_BD
 
 

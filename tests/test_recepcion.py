@@ -24,6 +24,10 @@ def admin(cliente, entrar):
     return entrar(cliente, "admin")
 
 
+# Datos de quien paga, obligatorios en cada pago
+PAGADOR = {"pagador_nombres": "Ana", "pagador_apellidos": "Rivera", "pagador_identidad": "0801-1992-04567"}
+
+
 def crear(cliente, encabezado, ruta, datos):
     r = cliente.post(ruta, json=datos, headers=encabezado)
     assert r.status_code == 201, r.text
@@ -79,16 +83,16 @@ def test_cobro_en_partes_hasta_pagar(cliente, recepcion, proyecto):
     cobro = cliente.get(f"{ruta}/cobro", headers=recepcion).json()
     assert (cobro["total"], cobro["pagado"], cobro["saldo"], cobro["estado_pago"]) == (500, 0, 500, "pendiente")
 
-    anticipo = crear(cliente, recepcion, f"{ruta}/pagos", {"monto": 200, "metodo": "efectivo"})
+    anticipo = crear(cliente, recepcion, f"{ruta}/pagos", {"monto": 200, "metodo": "efectivo", "tipo": "anticipo", **PAGADOR})
     assert (anticipo["pagado"], anticipo["saldo"], anticipo["estado_pago"]) == (200, 300, "parcial")
     assert anticipo["pagos"][0]["registrado_por"] == "recepcion"
 
-    r = cliente.post(f"{ruta}/pagos", json={"monto": 301, "metodo": "tarjeta"}, headers=recepcion)
+    r = cliente.post(f"{ruta}/pagos", json={"monto": 301, "metodo": "efectivo", **PAGADOR}, headers=recepcion)
     assert r.status_code == 400 and "mayor que el saldo" in r.json()["detail"]
 
-    final = crear(cliente, recepcion, f"{ruta}/pagos", {"monto": 300, "metodo": "transferencia", "referencia": "TRF-1"})
+    final = crear(cliente, recepcion, f"{ruta}/pagos", {"monto": 300, "metodo": "transferencia", "banco": "Ficohsa", "referencia": "TRF-1", **PAGADOR})
     assert (final["saldo"], final["estado_pago"]) == (0, "pagado")
-    r = cliente.post(f"{ruta}/pagos", json={"monto": 1, "metodo": "efectivo"}, headers=recepcion)
+    r = cliente.post(f"{ruta}/pagos", json={"monto": 1, "metodo": "efectivo", **PAGADOR}, headers=recepcion)
     assert r.status_code == 400 and "ya está pagado" in r.json()["detail"]
 
 
@@ -107,7 +111,7 @@ def test_lista_de_cobros_por_estado(cliente, recepcion, proyecto):
 
 
 def test_solo_la_administracion_anula_pagos(cliente, recepcion, admin, entrar, proyecto):
-    cobro = crear(cliente, recepcion, f"/ordenes/{proyecto['orden']['id']}/pagos", {"monto": 100, "metodo": "efectivo"})
+    cobro = crear(cliente, recepcion, f"/ordenes/{proyecto['orden']['id']}/pagos", {"monto": 100, "metodo": "efectivo", **PAGADOR})
     pago_id = cobro["pagos"][0]["id"]
     assert cliente.delete(f"/pagos/{pago_id}", headers=recepcion).status_code == 403
     assert cliente.delete(f"/pagos/{pago_id}", headers=admin).status_code == 200
@@ -184,7 +188,7 @@ def test_ajuste_invalido(cliente, recepcion, proyecto):
 
 # ---------- Historial de vehículos ----------
 def test_historial_del_vehiculo(cliente, recepcion, proyecto):
-    crear(cliente, recepcion, f"/ordenes/{proyecto['orden']['id']}/pagos", {"monto": 150, "metodo": "efectivo"})
+    crear(cliente, recepcion, f"/ordenes/{proyecto['orden']['id']}/pagos", {"monto": 150, "metodo": "efectivo", **PAGADOR})
     historial = cliente.get(f"/vehiculos/{proyecto['vehiculo']['id']}/historial", headers=recepcion).json()
     assert len(historial) == 1
     assert historial[0] == {

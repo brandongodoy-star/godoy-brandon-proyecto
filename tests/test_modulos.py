@@ -17,6 +17,12 @@ def api(entrar):
         yield c
 
 
+@pytest.fixture(scope="module")
+def admin(api, entrar):
+    """Encabezado de la administración: solo ella edita y elimina clientes y vehículos."""
+    return entrar(api, "admin")
+
+
 # ---------- Ayudantes para crear datos ----------
 def crear(api, ruta, datos):
     r = api.post(ruta, json=datos)
@@ -69,19 +75,29 @@ def test_sin_token_no_hay_acceso(api, ruta):
 
 
 # ---------- Clientes ----------
-def test_crud_cliente(api):
+def test_crud_cliente(api, admin):
     cliente = crear(api, "/clientes", {"nombre": "  Laura Paz ", "telefono": "9876-5432"})
     assert cliente["nombre"] == "Laura Paz"
     assert api.get(f"/clientes/{cliente['id']}").json() == cliente
 
     datos = {"nombre": "Laura Paz", "telefono": "3333-4444", "direccion": "Col. Kennedy"}
-    r = api.put(f"/clientes/{cliente['id']}", json=datos)
+    r = api.put(f"/clientes/{cliente['id']}", json=datos, headers=admin)
     assert r.status_code == 200
     assert r.json()["direccion"] == "Col. Kennedy"
     assert any(c["id"] == cliente["id"] for c in api.get("/clientes").json())
 
-    assert api.delete(f"/clientes/{cliente['id']}").status_code == 200
+    assert api.delete(f"/clientes/{cliente['id']}", headers=admin).status_code == 200
     assert api.get(f"/clientes/{cliente['id']}").status_code == 404
+
+
+def test_recepcion_no_edita_ni_elimina_clientes_ni_vehiculos(api):
+    vehiculo = nuevo_vehiculo(api)
+    cambio = {k: vehiculo[k] for k in ("placa", "marca", "modelo", "anio", "cliente_id")}
+    assert api.put(f"/vehiculos/{vehiculo['id']}", json=cambio).status_code == 403
+    assert api.delete(f"/vehiculos/{vehiculo['id']}").status_code == 403
+    cliente = {"nombre": "Otro nombre", "telefono": "9999-0000"}
+    assert api.put(f"/clientes/{vehiculo['cliente_id']}", json=cliente).status_code == 403
+    assert api.delete(f"/clientes/{vehiculo['cliente_id']}").status_code == 403
 
 
 def test_cliente_con_datos_invalidos(api):
@@ -89,15 +105,16 @@ def test_cliente_con_datos_invalidos(api):
     assert r.status_code == 400
 
 
-def test_cliente_inexistente(api):
+def test_cliente_inexistente(api, admin):
     assert api.get("/clientes/99999").status_code == 404
-    assert api.put("/clientes/99999", json={"nombre": "Nadie", "telefono": "9999-9999"}).status_code == 404
-    assert api.delete("/clientes/99999").status_code == 404
+    datos = {"nombre": "Nadie", "telefono": "9999-9999"}
+    assert api.put("/clientes/99999", json=datos, headers=admin).status_code == 404
+    assert api.delete("/clientes/99999", headers=admin).status_code == 404
 
 
-def test_no_se_borra_cliente_con_vehiculos(api):
+def test_no_se_borra_cliente_con_vehiculos(api, admin):
     vehiculo = nuevo_vehiculo(api)
-    assert api.delete(f"/clientes/{vehiculo['cliente_id']}").status_code == 400
+    assert api.delete(f"/clientes/{vehiculo['cliente_id']}", headers=admin).status_code == 400
 
 
 # ---------- Vehículos ----------

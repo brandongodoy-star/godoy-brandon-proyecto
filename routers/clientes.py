@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, status
 from database import obtener_conexion
 from modelos import ClienteEntrada, ClienteRespuesta, MensajeRespuesta
 from repositorios import RepositorioCliente
-from seguridad import solo_personal
+from seguridad import solo_administrador, solo_personal
 
 router = APIRouter(
     prefix="/clientes", tags=["Clientes"], dependencies=[Depends(solo_personal)]
@@ -28,13 +28,14 @@ def crear_cliente(datos: ClienteEntrada):
         return RepositorioCliente(con).crear(datos.model_dump(mode="json"))
 
 
-@router.put("/{cliente_id}", response_model=ClienteRespuesta)
+# Editar y eliminar es solo de la administración: recepción puede ver y crear
+@router.put("/{cliente_id}", response_model=ClienteRespuesta, dependencies=[Depends(solo_administrador)])
 def actualizar_cliente(cliente_id: int, datos: ClienteEntrada):
     with obtener_conexion() as con:
         return RepositorioCliente(con).actualizar(cliente_id, datos.model_dump(mode="json"))
 
 
-@router.delete("/{cliente_id}", response_model=MensajeRespuesta)
+@router.delete("/{cliente_id}", response_model=MensajeRespuesta, dependencies=[Depends(solo_administrador)])
 def eliminar_cliente(cliente_id: int):
     with obtener_conexion() as con:
         RepositorioCliente(con).eliminar(cliente_id)

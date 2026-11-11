@@ -3,6 +3,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from database import obtener_conexion
 from modelos import (
     AvisoEntrada,
+    MensajeARecepcion,
+    MensajeMecanico,
     MensajeRespuesta,
     MiembroEntrada,
     NotaEntrada,
@@ -16,7 +18,7 @@ from modelos import (
     Trabajo,
     TrabajoDetalle,
 )
-from repositorios import RepositorioReporte, RepositorioRepuesto, RepositorioTrabajos
+from repositorios import RepositorioMensaje, RepositorioReporte, RepositorioRepuesto, RepositorioTrabajos
 from seguridad import solo_mecanico
 
 # Área limitada del mecánico: solo ve sus trabajos, sus reportes y su perfil
@@ -120,3 +122,31 @@ def mis_reportes(usuario: dict = Depends(mecanico_actual)):
 def crear_reporte(datos: ReporteEntrada, usuario: dict = Depends(mecanico_actual)):
     with obtener_conexion() as con:
         return RepositorioReporte(con).crear_de_mecanico(usuario["mecanico_id"], datos.model_dump())
+
+
+# ---------- Bandeja: mensajes de recepción ----------
+@router.get("/mensajes", response_model=list[MensajeMecanico])
+def mis_mensajes(usuario: dict = Depends(mecanico_actual)):
+    with obtener_conexion() as con:
+        return RepositorioMensaje(con).listar(usuario["mecanico_id"])
+
+
+@router.post("/mensajes/leer-todos", response_model=MensajeRespuesta)
+def leer_todos(usuario: dict = Depends(mecanico_actual)):
+    with obtener_conexion() as con:
+        cantidad = RepositorioMensaje(con).marcar_todos(usuario["mecanico_id"])
+    return {"mensaje": f"{cantidad} mensajes marcados como leídos"}
+
+
+@router.post("/mensajes/{mensaje_id}/leido", response_model=MensajeRespuesta)
+def marcar_leido(mensaje_id: int, usuario: dict = Depends(mecanico_actual)):
+    with obtener_conexion() as con:
+        RepositorioMensaje(con).marcar_leido(mensaje_id, usuario["mecanico_id"])
+    return {"mensaje": "Mensaje leído"}
+
+
+@router.post("/mensajes", response_model=MensajeMecanico, status_code=status.HTTP_201_CREATED)
+def escribir_a_recepcion(datos: MensajeARecepcion, usuario: dict = Depends(mecanico_actual)):
+    """Mientras tenga un proyecto activo, el mecánico puede escribirle a recepción (por ejemplo, para pedir algo)."""
+    with obtener_conexion() as con:
+        return RepositorioMensaje(con).escribir_a_recepcion(usuario["mecanico_id"], datos.model_dump())

@@ -14,6 +14,8 @@ from routers import (
     cobros,
     mecanico,
     mecanicos,
+    mensajes,
+    movimientos,
     notificaciones,
     ordenes,
     peticiones,
@@ -46,6 +48,8 @@ app.include_router(notificaciones.router)
 app.include_router(reportes.router)
 app.include_router(peticiones.router)
 app.include_router(cobros.router)
+app.include_router(mensajes.router)
+app.include_router(movimientos.router)
 app.include_router(clientes.router)
 app.include_router(vehiculos.router)
 app.include_router(mecanicos.router)
