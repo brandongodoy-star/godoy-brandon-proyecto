@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, status
 
 from database import obtener_conexion
 from modelos import (
+    AnticipoRespuesta,
     CobroDetalle,
     CobroProyecto,
     EstadoPago,
@@ -34,6 +35,13 @@ def registrar_pago(orden_id: int, datos: PagoEntrada, usuario: dict = Depends(so
     """Pago o anticipo de un trabajo de taller, con los datos de quien paga."""
     with obtener_conexion() as con:
         return RepositorioPago(con).registrar(orden_id, datos.model_dump(), usuario["username"])
+
+
+@router.get("/anticipos", response_model=list[AnticipoRespuesta], dependencies=[Depends(solo_personal)])
+def listar_anticipos():
+    """Apartado de pagos anticipados: los abonos hechos antes de que el trabajo esté listo."""
+    with obtener_conexion() as con:
+        return RepositorioPago(con).anticipos()
 
 
 @router.delete("/pagos/{pago_id}", response_model=MensajeRespuesta)

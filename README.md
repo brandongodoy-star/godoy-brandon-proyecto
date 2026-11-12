@@ -94,13 +94,15 @@ Recepción (y administración) tiene más poder que los mecánicos:
 
 | Sección | Qué hace |
 |---|---|
-| **Proyectos** | Proyectos de trabajo: vehículo, datos del cliente, problema e **indicaciones del cliente** (los mecánicos también las ven). Los mecánicos se eligen en dos apartados con buscador: **Líder** y **Acompañantes**. Al abrir un proyecto se ven su costo, lo pagado, el saldo, los problemas que surgieron y un botón para mandar un mensaje a su equipo. |
+| **Proyectos** | Proyectos de trabajo: vehículo, datos del cliente, problema, **indicaciones del cliente** (los mecánicos también las ven) y **fecha límite de entrega** (la que pide el cliente, o «No especificó»). Al elegir el vehículo, el formulario marca solo la **escala del trabajo** (Estándar, Premium o Lujo); si se toca una escala, la lista de vehículos muestra solo los de esa escala. Las tarjetas avisan si la entrega está cerca o vencida. Los mecánicos se eligen en dos apartados con buscador: **Líder** y **Acompañantes**. Al abrir un proyecto se ven su costo, lo pagado, el saldo, los problemas que surgieron y un botón para mandar un mensaje a su equipo. |
 | **Bandeja** | Recibe lo que mandan los mecánicos: **peticiones de material** («Aceptar y enviar» descuenta el material del almacén, lo agrega al proyecto y le avisa al mecánico; o rechazar con un motivo), **reportes** (en los del líder, recepción decide cuántos créditos bajar al reportado) y **avisos** (trabajo listo, problemas que surgieron). En **Mensajes** están los *Recibidos* de los mecánicos (se pueden responder) y los *Enviados* a uno o varios mecánicos. |
-| **Cobros** | Total, pagado y saldo de cada proyecto. **Registrar pago** abre una ventana que pregunta si es un **producto individual** (venta de un repuesto suelto del almacén) o un **trabajo de taller** (un proyecto). En un trabajo se elige **Pago** o **Pago anticipado**; el anticipo solo se acepta mientras el proyecto está «recibido» o «en reparación». En cada pago, anticipo o venta se piden los datos de quien paga (nombres, apellidos, identidad y correo opcional) y la forma de pago: con **tarjeta**, la marca, los últimos 4 dígitos, el titular y el número de autorización (nunca el número completo ni el código de seguridad); con **transferencia**, el banco y la referencia. Solo administración puede anular un pago. |
+| **Cobros** | Total, pagado y saldo de cada proyecto. **Registrar pago** abre una ventana con tres opciones: **producto individual** (venta de un repuesto suelto del almacén), **trabajo de taller** (pago de un proyecto) o **pago anticipado**. En cada pago, anticipo o venta se piden los datos de quien paga (nombres, apellidos, identidad y correo opcional) y la forma de pago: con **tarjeta**, la marca, los últimos 4 dígitos, el titular y el número de autorización (nunca el número completo ni el código de seguridad); con **transferencia**, el banco y la referencia. Solo administración puede anular un pago. |
+| **Anticipos** | Apartado propio de los **pagos anticipados**: adelantos de proyectos que todavía no están listos (solo se aceptan mientras el proyecto está «recibido» o «en reparación»). Muestra el total anticipado, cada anticipo con su proyecto, cliente, fecha de entrega y quién pagó, y los proyectos que todavía pueden recibir uno. |
 | **Movimientos** | Historial de todo lo que mueve dinero o material: pagos, anticipos, pagos anulados, ventas de repuestos, solicitudes aceptadas y repuestos usados o devueltos en los proyectos, con fecha, proyecto, cantidad, monto y quién lo hizo. Se filtra por tipo y se busca. |
 | **Almacén** | Inventario de repuestos. Con «Enviar» se manda material a un proyecto activo: se descuenta del almacén y se suma al costo. |
 | **Puntuaciones** | Los **líderes que culminaron un proyecto**, con los resultados que dieron a cada acompañante, y los botones para calificar al líder. También el ranking de mecánicos y el **ajuste manual de créditos** (enteros de -100 a 100, con motivo y proyecto opcional). |
-| **Vehículos** | Registro de vehículos; con el reloj se abre su **historial**: todos sus proyectos, cuánto se ha gastado y cuánto se debe. |
+| **Vehículos** | Registro de vehículos **organizado por escala de trabajo** (Estándar, Premium, Lujo), con pestañas para filtrar. Con el reloj se abre su **historial**: todos sus proyectos, cuánto se ha gastado y cuánto se debe. |
+| **Clientes** | Organizados por la **escala de trabajo de sus autos** (la más alta si tiene varios); los que aún no tienen vehículo van aparte. |
 
 Entregar un proyecto con saldo pendiente es posible: el sistema avisa cuánto debe el cliente, y el saldo queda en Cobros.
 
@@ -108,10 +110,10 @@ Entregar un proyecto con saldo pendiente es posible: el sistema avisa cuánto de
 
 La carpeta `frontend/` tiene la página que FastAPI sirve en la raíz (`index.html`, `estilos.css` y `app.js`, sin librerías externas). Lo que se ve depende del rol:
 
-- **Administración y recepción:** Resumen, Proyectos (tablero por estado), Bandeja, Cobros, Movimientos, Almacén, Puntuaciones, Vehículos, Clientes y Mecánicos. **Cuentas** es solo para administración, y solo ella ve los botones de editar y eliminar en Clientes y Vehículos.
+- **Administración y recepción:** Resumen, Proyectos (tablero por estado), Bandeja, Cobros, Anticipos, Movimientos, Almacén, Puntuaciones, Vehículos, Clientes y Mecánicos. **Cuentas** es solo para administración, y solo ella ve los botones de editar y eliminar en Clientes y Vehículos.
 - **Mecánico:** el área descrita arriba.
 
-La página pide sus archivos con un número de versión (`app.js?v=9`). Si se cambian, hay que subir ese número en `index.html` para que los navegadores bajen la versión nueva.
+La página pide sus archivos con un número de versión (`app.js?v=10`). Si se cambian, hay que subir ese número en `index.html` para que los navegadores bajen la versión nueva.
 
 Tiene modo claro u oscuro y diseño adaptado al celular. La sesión se guarda solo mientras la pestaña esté abierta.
 
@@ -123,12 +125,13 @@ Tiene modo claro u oscuro y diseño adaptado al celular. La sesión se guarda so
 | Vehículos | `/vehiculos` | Filtrar por `?cliente_id=`; editar y eliminar: solo administración |
 | Mecánicos | `/mecanicos` | Filtrar con `?solo_activos=true` |
 | Repuestos | `/repuestos` | |
-| Órdenes de servicio | `/ordenes` | Filtrar por `?estado=` o `?vehiculo_id=` |
+| Órdenes de servicio | `/ordenes` | Filtrar por `?estado=` o `?vehiculo_id=`. `fecha_limite` opcional (`null` = el cliente no especificó), no antes de la fecha de ingreso |
 | Cuentas (solo administración) | `/usuarios` | Sin edición: se crean y se eliminan |
 | Área del mecánico | `/mecanico/...` | Perfil, trabajos, avisos, reportes, y equipo del líder (`/mecanico/trabajos/{id}/equipo/{miembro}` y `/reportes-equipo`) |
 | Notificaciones y reportes | `/notificaciones`, `/reportes` | Para administración y recepción |
 | Peticiones de material | `/peticiones` | Enviar (`/{id}/enviar`) o rechazar (`/{id}/rechazar`) |
 | Cobros | `/cobros`, `/ordenes/{id}/cobro`, `/ordenes/{id}/pagos` | `tipo`: `pago` o `anticipo`, con los datos de quien paga y de la tarjeta o transferencia. Anular: `DELETE /pagos/{id}` (solo administración) |
+| Anticipos | `/anticipos` | Lista de pagos anticipados con los datos del proyecto |
 | Ventas de repuestos | `/ventas` | Venta de un producto individual: descuenta del almacén |
 | Historial de movimientos | `/movimientos` | Filtrar por uno o varios tipos: `?tipo=pago&tipo=venta` |
 | Créditos e historial | `/mecanicos/{id}/creditos`, `/vehiculos/{id}/historial` | Ajuste manual de créditos e historial de un vehículo |

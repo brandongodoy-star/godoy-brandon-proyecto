@@ -33,6 +33,8 @@ function guardar(clave, valor, almacen = sessionStorage) {
 
 // ===================== Íconos =====================
 const ICONOS = {
+  calendario: '<rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
+  anticipo: '<circle cx="12" cy="13" r="7.5"/><path d="M12 9.5v3.5l2.5 1.5M9.5 2.5h5M12 2.5v3"/>',
   resumen: '<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>',
   ordenes: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4.5V3h6v1.5M9 10h6M9 14h6M9 18h3"/>',
   clientes: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5M16 4.6a3.5 3.5 0 0 1 0 6.8M18.5 14.8c1.6.8 2.7 2.5 3 5.2"/>',
@@ -126,6 +128,23 @@ const claseEstado = (clave) => `estado-${clave.replace(" ", "-")}`;
 const insigniaEstado = (clave) =>
   `<span class="insignia ${claseEstado(clave)}"><span class="punto" style="background:currentColor"></span>${esc(nombreEstado(clave))}</span>`;
 const insigniaCategoria = (clave) => `<span class="insignia ${CATEGORIAS[clave].clase}">${CATEGORIAS[clave].nombre}</span>`;
+const ORDEN_ESCALAS = Object.keys(CATEGORIAS); // estándar → premium → lujo
+
+/** Días que faltan para una fecha AAAA-MM-DD (negativo si ya pasó). */
+const diasPara = (iso) => Math.round((new Date(`${iso}T00:00:00`) - new Date(`${hoy()}T00:00:00`)) / 86400000);
+
+/** Insignia de la fecha límite de entrega: avisa si ya venció o si está cerca. */
+function insigniaLimite(fechaLimite, estadoOrden) {
+  const insignia = (clase, texto) => `<span class="insignia ${clase}">${icono("calendario")}${texto}</span>`;
+  if (!fechaLimite) return insignia("insignia-neutra", "No especificó");
+  const corta = new Date(`${fechaLimite}T00:00:00`).toLocaleDateString("es-HN", { day: "numeric", month: "short" });
+  if (estadoOrden === "entregado") return insignia("insignia-neutra", `Límite ${corta}`);
+  const dias = diasPara(fechaLimite);
+  if (dias < 0) return insignia("insignia-peligro", `Vencido · ${corta}`);
+  if (dias === 0) return insignia("insignia-peligro", "Entregar hoy");
+  if (dias <= 2) return insignia("insignia-baja", `${dias === 1 ? "Mañana" : "En 2 días"} · ${corta}`);
+  return insignia("insignia-ok", `Entregar el ${corta}`);
+}
 const insigniaNivel = (creditos) => {
   const nivel = nivelDe(creditos);
   return `<span class="insignia ${nivel.clase}">${icono("estrella")}${nivel.nombre}</span>`;
@@ -204,7 +223,7 @@ async function cargarDatos() {
     : {
         clientes: "/clientes", vehiculos: "/vehiculos", mecanicos: "/mecanicos", repuestos: "/repuestos", ordenes: "/ordenes",
         notificaciones: "/notificaciones", peticiones: "/peticiones", reportesTaller: "/reportes", cobros: "/cobros", mensajes: "/mensajes",
-        ventas: "/ventas", movimientos: "/movimientos",
+        ventas: "/ventas", movimientos: "/movimientos", anticipos: "/anticipos",
       };
   if (estado.yo.rol === "administrador") rutas.usuarios = "/usuarios";
   const respuestas = await Promise.all(Object.values(rutas).map((ruta) => api(ruta)));
@@ -317,9 +336,12 @@ function campoHTML(campo, valor) {
       <div class="lista-opciones">${opciones || `<span class="ayuda">${esc(campo.textoVacio ?? "No hay opciones")}</span>`}</div>${ayuda}</fieldset>`;
   }
   if (campo.tipo === "select") {
-    const opciones = campo.opciones
-      .map((o) => `<option value="${esc(o.valor)}" ${o.valor === valor ? "selected" : ""}>${esc(o.texto)}</option>`)
-      .join("");
+    const opcion = (o) => `<option value="${esc(o.valor)}" ${o.valor === valor ? "selected" : ""}>${esc(o.texto)}</option>`;
+    // Opciones con «grupo» se agrupan (por ejemplo, los vehículos por escala de trabajo)
+    const grupos = [...new Set(campo.opciones.map((o) => o.grupo).filter(Boolean))];
+    const opciones = grupos.length
+      ? grupos.map((g) => `<optgroup label="${esc(g)}" data-grupo-opciones="${esc(g)}">${campo.opciones.filter((o) => o.grupo === g).map(opcion).join("")}</optgroup>`).join("")
+      : campo.opciones.map(opcion).join("");
     const vacia = campo.textoVacio ?? "Seleccione…";
     return `<div class="${clase}"${grupo}><label for="${id}">${esc(campo.etiqueta)}</label>
       <select id="${id}" name="${campo.nombre}" ${atributos}>${vacia ? `<option value="">${esc(vacia)}</option>` : ""}${opciones}</select>${ayuda}</div>`;
@@ -335,6 +357,7 @@ function campoHTML(campo, valor) {
 function leerFormulario(formulario, campos) {
   const datos = {};
   for (const campo of campos) {
+    if (campo.soloVista) continue; // se muestra en el formulario pero no se envía
     if (campo.tipo === "checks") {
       const marcados = formulario.querySelectorAll(`input[name="${campo.nombre}"]:checked`);
       datos[campo.nombre] = [...marcados].map((casilla) => Number(casilla.value));
@@ -423,6 +446,12 @@ function insigniaExistencia(existencia) {
 
 const opcionesCategoria = Object.entries(CATEGORIAS).map(([valor, c]) => ({ valor, texto: c.nombre }));
 
+/** Escala de trabajo de un cliente: la más alta entre sus vehículos ("sin" si no tiene). */
+function escalaCliente(cliente) {
+  const escalas = estado.datos.vehiculos.filter((v) => v.cliente_id === cliente.id).map((v) => v.categoria);
+  return escalas.length ? ORDEN_ESCALAS.filter((e) => escalas.includes(e)).at(-1) : "sin";
+}
+
 const MODULOS = {
   clientes: {
     ruta: "/clientes", singular: "cliente", editaSoloAdmin: true,
@@ -430,8 +459,17 @@ const MODULOS = {
       { titulo: "Nombre", valor: (c) => `<strong>${esc(c.nombre)}</strong>` },
       { titulo: "Teléfono", valor: (c) => `<span class="mono">${esc(c.telefono)}</span>` },
       { titulo: "Dirección", valor: (c) => esc(c.direccion || "—") },
+      {
+        titulo: "Escala de sus autos",
+        valor: (c) => {
+          const escalas = new Set(estado.datos.vehiculos.filter((v) => v.cliente_id === c.id).map((v) => v.categoria));
+          return escalas.size ? ORDEN_ESCALAS.filter((e) => escalas.has(e)).map(insigniaCategoria).join(" ") : `<span class="texto-tenue">Sin vehículos</span>`;
+        },
+      },
       { titulo: "Vehículos", clase: "numero", valor: (c) => cantidad(estado.datos.vehiculos, "cliente_id", c.id) },
     ],
+    escala: (c) => escalaCliente(c),
+    textoEscala: { singular: "cliente", plural: "clientes" },
     texto: (c) => `${c.nombre} ${c.telefono} ${c.direccion ?? ""}`,
     nombre: (c) => c.nombre,
     campos: () => [
@@ -450,6 +488,8 @@ const MODULOS = {
       { titulo: "Dueño", valor: (v) => esc(porId(estado.datos.clientes, v.cliente_id)?.nombre ?? "—") },
       { titulo: "Órdenes", clase: "numero", valor: (v) => cantidad(estado.datos.ordenes, "vehiculo_id", v.id) },
     ],
+    escala: (v) => v.categoria,
+    textoEscala: { singular: "vehículo", plural: "vehículos" },
     texto: (v) => `${v.placa} ${v.marca} ${v.modelo} ${v.anio} ${CATEGORIAS[v.categoria].nombre} ${porId(estado.datos.clientes, v.cliente_id)?.nombre ?? ""}`,
     nombre: (v) => `${v.placa} (${v.marca} ${v.modelo})`,
     campos: () => [
@@ -539,25 +579,25 @@ const MODULOS = {
 
 const nuevoTexto = (modulo) => `${modulo.femenino ? "Nueva" : "Nuevo"} ${modulo.singular}`;
 
+const NOMBRE_ESCALA = (clave) => (clave === "sin" ? "Sin vehículos" : CATEGORIAS[clave].nombre);
+
 function pintarModulo(clave) {
   const modulo = MODULOS[clave];
   const termino = estado.busqueda.toLowerCase();
-  const filas = estado.datos[clave].filter((item) => modulo.texto(item).toLowerCase().includes(termino));
+  // Clientes y vehículos se organizan por escala de trabajo (estándar → premium → lujo)
+  const escalas = modulo.escala ? [...ORDEN_ESCALAS, ...(clave === "clientes" ? ["sin"] : [])] : [];
+  estado.filtroEscala ??= {};
+  const filtroEscala = modulo.escala ? estado.filtroEscala[clave] ?? "todas" : "todas";
+  let filas = estado.datos[clave].filter((item) => modulo.texto(item).toLowerCase().includes(termino));
+  if (modulo.escala) {
+    if (filtroEscala !== "todas") filas = filas.filter((item) => modulo.escala(item) === filtroEscala);
+    filas = [...filas].sort((a, b) => escalas.indexOf(modulo.escala(a)) - escalas.indexOf(modulo.escala(b)));
+  }
   // Clientes y vehículos: recepción los registra, pero solo la administración los edita o elimina
   const puedeCambiar = !modulo.editaSoloAdmin || estado.yo.rol === "administrador";
+  const columnas = modulo.columnas.length + 1;
 
-  $("#vista").innerHTML = `
-    <section class="panel">
-      <div class="barra-herramientas">
-        <label class="buscador">${icono("buscar")}
-          <input id="busqueda" type="search" placeholder="Buscar ${esc(modulo.singular)}…" value="${esc(estado.busqueda)}" aria-label="Buscar" />
-        </label>
-        <span class="conteo">${filas.length} de ${estado.datos[clave].length}</span>
-      </div>
-      ${filas.length ? `
-      <div class="tabla-contenedor"><table>
-        <thead><tr>${modulo.columnas.map((c) => `<th class="${c.clase ?? ""}">${c.titulo}</th>`).join("")}<th></th></tr></thead>
-        <tbody>${filas.map((item) => `
+  const filaHTML = (item) => `
           <tr>
             ${modulo.columnas.map((c) => `<td class="${c.clase ?? ""}">${c.valor(item)}</td>`).join("")}
             <td class="acciones-fila">
@@ -565,14 +605,48 @@ function pintarModulo(clave) {
               ${modulo.sinEditar || !puedeCambiar ? "" : `<button type="button" class="boton boton-icono" data-editar="${item.id}" aria-label="Editar">${icono("editar")}</button>`}
               ${puedeCambiar ? `<button type="button" class="boton boton-icono peligro" data-eliminar="${item.id}" aria-label="Eliminar">${icono("borrar")}</button>` : ""}
             </td>
-          </tr>`).join("")}
+          </tr>`;
+  // Con «Todas» se muestra un encabezado por escala; con un filtro, solo esa escala
+  const cuerpo = modulo.escala && filtroEscala === "todas"
+    ? escalas.map((e) => {
+        const deEscala = filas.filter((item) => modulo.escala(item) === e);
+        if (!deEscala.length) return "";
+        const { singular, plural } = modulo.textoEscala;
+        return `<tr class="fila-grupo"><td colspan="${columnas}">${e === "sin" ? `<span class="insignia insignia-neutra">Sin vehículos</span>` : insigniaCategoria(e)}
+          <span>${deEscala.length} ${deEscala.length === 1 ? singular : plural}</span></td></tr>${deEscala.map(filaHTML).join("")}`;
+      }).join("")
+    : filas.map(filaHTML).join("");
+  const pestanasEscala = modulo.escala ? `
+        <div class="pestanas-filtro" role="tablist" aria-label="Escala de trabajo">
+          ${["todas", ...escalas].map((e) => {
+            const n = e === "todas" ? estado.datos[clave].length : estado.datos[clave].filter((item) => modulo.escala(item) === e).length;
+            return `<button type="button" class="pestana-filtro ${e === filtroEscala ? "activa" : ""}" data-escala="${e}">${e === "todas" ? "Todas las escalas" : NOMBRE_ESCALA(e)} <span class="cuenta-pestana">${n}</span></button>`;
+          }).join("")}
+        </div>` : "";
+
+  $("#vista").innerHTML = `
+    <section class="panel">
+      <div class="barra-herramientas">
+        <label class="buscador">${icono("buscar")}
+          <input id="busqueda" type="search" placeholder="Buscar ${esc(modulo.singular)}…" value="${esc(estado.busqueda)}" aria-label="Buscar" />
+        </label>
+        ${pestanasEscala}
+        <span class="conteo">${filas.length} de ${estado.datos[clave].length}</span>
+      </div>
+      ${filas.length ? `
+      <div class="tabla-contenedor"><table>
+        <thead><tr>${modulo.columnas.map((c) => `<th class="${c.clase ?? ""}">${c.titulo}</th>`).join("")}<th></th></tr></thead>
+        <tbody>${cuerpo}
         </tbody>
       </table></div>` : `
-      <div class="vacio">${icono(clave)}<strong>${termino ? "Sin resultados" : `Todavía no hay ${esc(estado.vistas[clave].titulo.toLowerCase())}`}</strong>
-        <span>${termino ? "Pruebe con otra búsqueda." : `Use el botón «${esc(nuevoTexto(modulo))}» para agregar.`}</span></div>`}
+      <div class="vacio">${icono(clave)}<strong>${termino || filtroEscala !== "todas" ? "Sin resultados" : `Todavía no hay ${esc(estado.vistas[clave].titulo.toLowerCase())}`}</strong>
+        <span>${termino || filtroEscala !== "todas" ? "Pruebe con otra búsqueda u otra escala." : `Use el botón «${esc(nuevoTexto(modulo))}» para agregar.`}</span></div>`}
     </section>`;
 
   conectarBusqueda();
+  $("#vista").querySelectorAll("[data-escala]").forEach((boton) =>
+    boton.addEventListener("click", () => { estado.filtroEscala[clave] = boton.dataset.escala; pintarModulo(clave); })
+  );
   $("#vista").querySelectorAll("[data-editar]").forEach((boton) =>
     boton.addEventListener("click", () => formularioModulo(clave, porId(estado.datos[clave], Number(boton.dataset.editar))))
   );
@@ -635,12 +709,13 @@ function textoVehiculo(vehiculo) {
 function tarjetaOrden(orden) {
   const vehiculo = porId(estado.datos.vehiculos, orden.vehiculo_id);
   const mecanico = porId(estado.datos.mecanicos, orden.mecanico_id);
-  const categoria = vehiculo && vehiculo.categoria !== "estandar" ? insigniaCategoria(vehiculo.categoria) : "";
+  const categoria = vehiculo ? insigniaCategoria(vehiculo.categoria) : "";
   return `
     <button type="button" class="tarjeta-orden" data-orden="${orden.id}">
       <div class="arriba"><span class="placa">${esc(vehiculo?.placa ?? "—")}</span>${categoria}<span class="numero-orden">#${orden.id}</span></div>
       <div class="vehiculo">${esc(textoVehiculo(vehiculo))}</div>
       <div class="diagnostico">${esc(orden.diagnostico || "Sin diagnóstico")}</div>
+      ${orden.estado !== "entregado" ? `<div class="limite-tarjeta">${insigniaLimite(orden.fecha_limite, orden.estado)}</div>` : ""}
       <div class="abajo">
         <span class="mecanico-mini"><span class="avatar">${esc(iniciales(mecanico?.nombre))}</span><span>${esc(mecanico?.nombre ?? "—")}</span>${orden.equipo.length ? `<span class="mas-equipo" title="Equipo de ${orden.equipo.length + 1}">+${orden.equipo.length}</span>` : ""}</span>
         <span>${orden.calificacion ? esc(nombreCalificacion(orden.calificacion)) : fecha(orden.fecha_ingreso)}</span>
@@ -718,12 +793,23 @@ function camposOrden(orden) {
     bloqueado: motivo(m),
     datos: { creditos: m.creditos, actual: yaEstan.has(m.id) ? "1" : "" },
   });
+  // Vehículos agrupados por escala de trabajo; la escala del proyecto es la de su vehículo
+  const vehiculos = [...estado.datos.vehiculos].sort((a, b) =>
+    ORDEN_ESCALAS.indexOf(a.categoria) - ORDEN_ESCALAS.indexOf(b.categoria) || a.placa.localeCompare(b.placa));
   return [
     {
+      nombre: "escala", etiqueta: "Escala del trabajo", tipo: "radios", numerico: false, soloVista: true, completo: true, enLinea: true,
+      opciones: ORDEN_ESCALAS.map((e) => ({
+        valor: e, texto: CATEGORIAS[e].nombre,
+        detalle: `${cantidad(estado.datos.vehiculos, "categoria", e)} vehículos · líder ${NIVELES.find((n) => n.categoria === e).nombre} o más`,
+      })),
+      ayuda: "Se elige sola con el vehículo. Si toca una escala, la lista de vehículos muestra solo los de esa escala.",
+    },
+    {
       nombre: "vehiculo_id", etiqueta: "Vehículo", tipo: "select", requerido: true, completo: true,
-      opciones: estado.datos.vehiculos.map((v) => ({
-        valor: v.id,
-        texto: `${v.placa} · ${v.marca} ${v.modelo} (${CATEGORIAS[v.categoria].nombre}) — ${porId(estado.datos.clientes, v.cliente_id)?.nombre ?? ""}`,
+      opciones: vehiculos.map((v) => ({
+        valor: v.id, grupo: CATEGORIAS[v.categoria].nombre,
+        texto: `${v.placa} · ${v.marca} ${v.modelo} — ${porId(estado.datos.clientes, v.cliente_id)?.nombre ?? ""}`,
       })),
     },
     {
@@ -738,6 +824,11 @@ function camposOrden(orden) {
     },
     { nombre: "fecha_ingreso", etiqueta: "Fecha de ingreso", tipo: "date", requerido: true, max: hoy(), porDefecto: hoy() },
     { nombre: "mano_obra", etiqueta: "Mano de obra (L)", tipo: "number", min: 0, paso: 1, porDefecto: 0 },
+    {
+      nombre: "fecha_limite", etiqueta: "Fecha límite de entrega", tipo: "date", requerido: true, min: orden?.fecha_ingreso ?? hoy(),
+      ayuda: "Cuándo quiere el cliente su vehículo de vuelta. Si no dio fecha, marque «No especificó»",
+    },
+    { nombre: "sin_fecha_limite", etiqueta: "No especificó (el cliente no dio fecha)", tipo: "checkbox" },
     { nombre: "diagnostico", etiqueta: "Problema", tipo: "textarea", maxlength: 300, completo: true, ayuda: "Qué le pasa al vehículo y qué hay que revisar" },
     { nombre: "indicaciones", etiqueta: "Indicaciones del cliente", tipo: "textarea", maxlength: 300, completo: true, ayuda: "Datos relevantes del cliente; los mecánicos también los ven" },
   ];
@@ -752,10 +843,13 @@ function formularioOrden(orden) {
     titulo: orden ? `Editar proyecto #${orden.id}` : "Nuevo proyecto de trabajo",
     subtitulo: orden ? "" : "El proyecto empieza en estado «Recibido» y le llega al líder y a su equipo",
     campos: camposOrden(orden),
-    valores: orden ?? {},
+    valores: orden
+      ? { ...orden, escala: porId(estado.datos.vehiculos, orden.vehiculo_id)?.categoria, sin_fecha_limite: !orden.fecha_limite }
+      : {},
     textoBoton: orden ? "Guardar cambios" : "Crear proyecto",
-    enviar: async (datos) => {
+    enviar: async ({ sin_fecha_limite, ...datos }) => {
       datos.mano_obra ??= 0;
+      if (sin_fecha_limite) datos.fecha_limite = null;
       // Si el líder quedó marcado también en el equipo, se quita de ahí
       datos.equipo = datos.equipo.filter((id) => id !== datos.mecanico_id);
       const guardada = await api(orden ? `/ordenes/${orden.id}` : "/ordenes", { metodo: orden ? "PUT" : "POST", datos });
@@ -790,6 +884,42 @@ function formularioOrden(orden) {
   vehiculo.addEventListener("change", sincronizar);
   dialogo.querySelectorAll('input[name="mecanico_id"]').forEach((radio) => radio.addEventListener("change", sincronizar));
   sincronizar();
+
+  // Escala del trabajo: se marca sola con el vehículo; al tocarla, filtra la lista de vehículos
+  const radiosEscala = dialogo.querySelectorAll('input[name="escala"]');
+  const marcarEscala = () => {
+    const auto = porId(estado.datos.vehiculos, Number(vehiculo.value));
+    radiosEscala.forEach((radio) => (radio.checked = radio.value === auto?.categoria));
+  };
+  vehiculo.addEventListener("change", marcarEscala);
+  radiosEscala.forEach((radio) => radio.addEventListener("change", () => {
+    const nombre = CATEGORIAS[radio.value].nombre;
+    vehiculo.querySelectorAll("optgroup").forEach((grupo) => {
+      const otra = grupo.dataset.grupoOpciones !== nombre;
+      grupo.hidden = otra;
+      grupo.disabled = otra;
+    });
+    const auto = porId(estado.datos.vehiculos, Number(vehiculo.value));
+    if (auto && auto.categoria !== radio.value) {
+      vehiculo.value = "";
+      sincronizar();
+    }
+    vehiculo.focus();
+  }));
+  marcarEscala();
+
+  // Fecha límite: o se pone una fecha, o se marca «No especificó»
+  const limite = $("#campo-fecha_limite", dialogo);
+  const sinLimite = $("#campo-sin_fecha_limite", dialogo);
+  const ingreso = $("#campo-fecha_ingreso", dialogo);
+  const sincronizarLimite = () => {
+    limite.disabled = sinLimite.checked;
+    if (sinLimite.checked) limite.value = "";
+    limite.min = ingreso.value || hoy();
+  };
+  sinLimite.addEventListener("change", sincronizarLimite);
+  ingreso.addEventListener("change", sincronizarLimite);
+  sincronizarLimite();
 }
 
 /** Pide la calificación del trabajo antes de entregar. Resuelve con la clave elegida o "". */
@@ -857,6 +987,8 @@ async function abrirOrden(id) {
         <div class="dato"><small>Cliente</small><strong>${esc(cliente?.nombre ?? "—")}</strong><span class="mono">${esc(cliente?.telefono ?? "")}</span></div>
         <div class="dato"><small>Líder del trabajo</small><strong>${esc(mecanico?.nombre ?? "—")}</strong>${mecanico ? insigniaNivel(mecanico.creditos) : ""}</div>
         <div class="dato"><small>Mano de obra</small><strong>${dinero(orden.mano_obra)}</strong></div>
+        <div class="dato"><small>Escala del trabajo</small>${vehiculo ? insigniaCategoria(vehiculo.categoria) : "—"}</div>
+        <div class="dato"><small>Fecha límite de entrega</small><strong>${orden.fecha_limite ? fecha(orden.fecha_limite) : "No especificó"}</strong>${orden.fecha_limite ? insigniaLimite(orden.fecha_limite, orden.estado) : ""}</div>
         <div class="dato completo"><small>Equipo</small>${orden.equipo.length
           ? `<div class="chips-equipo">${orden.equipo.map((mid) => {
               const m = porId(estado.datos.mecanicos, mid);
@@ -1055,75 +1187,76 @@ async function elegirTipoDePago() {
     <div class="dialogo-encabezado"><div><h2>¿Qué se va a pagar?</h2><p>Elija el tipo de cobro</p></div></div>
     <div class="dialogo-cuerpo"><div class="opciones-cobro">
       <button type="button" class="opcion-cobro" data-respuesta="producto">${icono("repuestos")}<strong>Producto individual</strong><span>Venta de un repuesto suelto del almacén</span></button>
-      <button type="button" class="opcion-cobro" data-respuesta="trabajo">${icono("ordenes")}<strong>Trabajo de taller</strong><span>Pago o anticipo de un proyecto (servicio)</span></button>
+      <button type="button" class="opcion-cobro" data-respuesta="trabajo">${icono("ordenes")}<strong>Trabajo de taller</strong><span>Pago de un proyecto (servicio)</span></button>
+      <button type="button" class="opcion-cobro" data-respuesta="anticipo">${icono("anticipo")}<strong>Pago anticipado</strong><span>Adelanto de un proyecto que todavía no está listo</span></button>
     </div></div>
     <div class="dialogo-pie"><button type="button" class="boton boton-secundario" data-respuesta="">Cancelar</button></div>`);
   if (respuesta === "producto") formularioVenta();
   else if (respuesta === "trabajo") registrarPago();
+  else if (respuesta === "anticipo") registrarPago(undefined, "anticipo");
 }
 
-/** Pago o anticipo de un proyecto. Sin `cobro`, primero se elige el proyecto entre los que tienen saldo. */
-function registrarPago(cobro) {
-  const conSaldo = estado.datos.cobros.filter((c) => c.saldo > 0);
-  if (!cobro && !conSaldo.length) {
-    aviso("No hay proyectos con saldo pendiente", "error");
+/** Pago (tipo «pago») o pago anticipado (tipo «anticipo») de un proyecto. Son dos formularios aparte.
+ *  Sin `cobro`, primero se elige el proyecto entre los que pueden recibirlo. */
+function registrarPago(cobro, tipo = "pago") {
+  const esAnticipo = tipo === "anticipo";
+  // Un anticipo solo se acepta antes de que el trabajo esté listo
+  const candidatos = estado.datos.cobros.filter((c) => c.saldo > 0 && (!esAnticipo || ESTADOS_EDITABLES.includes(c.estado)));
+  if (cobro && esAnticipo && !ESTADOS_EDITABLES.includes(cobro.estado)) {
+    aviso("El trabajo ya está terminado: registre un pago, no un anticipo", "error");
     return;
   }
-  const sinAnticipo = (c) => (c && !ESTADOS_EDITABLES.includes(c.estado) ? "El trabajo ya está terminado: solo pagos" : "");
+  if (!cobro && !candidatos.length) {
+    aviso(esAnticipo ? "No hay proyectos activos con saldo para un anticipo" : "No hay proyectos con saldo pendiente", "error");
+    return;
+  }
+  const limiteDe = (c) => porId(estado.datos.ordenes, c.id)?.fecha_limite;
   const resumen = (c) => (c ? `Total ${dinero(c.total)} · pagado ${dinero(c.pagado)} · saldo ${dinero(c.saldo)}` : "Elija un proyecto");
   const campos = [
     ...(cobro ? [] : [{
-      nombre: "orden_id", etiqueta: "Proyecto a cobrar", tipo: "radios", requerido: true, completo: true, buscable: true,
-      textoBuscar: "Buscar por número, placa o cliente…",
-      opciones: conSaldo.map((c) => ({
+      nombre: "orden_id", etiqueta: esAnticipo ? "Proyecto que recibe el anticipo" : "Proyecto a cobrar", tipo: "radios",
+      requerido: true, completo: true, buscable: true, textoBuscar: "Buscar por número, placa o cliente…",
+      textoVacio: "No hay proyectos que puedan recibirlo",
+      opciones: candidatos.map((c) => ({
         valor: c.id, texto: `#${c.id} · ${c.placa} · ${c.marca} ${c.modelo}`,
-        detalle: `${c.cliente} · ${nombreEstado(c.estado)} · saldo ${dinero(c.saldo)}`,
+        detalle: `${c.cliente} · ${nombreEstado(c.estado)} · saldo ${dinero(c.saldo)}${limiteDe(c) ? ` · entrega ${fecha(limiteDe(c))}` : ""}`,
       })),
     }]),
     {
-      nombre: "tipo", etiqueta: "Tipo de pago", tipo: "radios", numerico: false, requerido: true, completo: true, enLinea: true, porDefecto: "pago",
-      opciones: [
-        { valor: "pago", texto: "Pago", detalle: "Abono o pago final del trabajo" },
-        { valor: "anticipo", texto: "Pago anticipado", detalle: "Adelanto antes de que el trabajo esté listo", bloqueado: sinAnticipo(cobro) || undefined },
-      ],
-    },
-    {
       // En lempiras enteros; solo si un saldo viejo tiene centavos se aceptan decimales para cerrarlo
-      nombre: "monto", etiqueta: "Monto (L)", tipo: "number", requerido: true, completo: true, min: 1, paso: 1,
-      ...(cobro ? { min: Math.min(1, cobro.saldo), max: cobro.saldo, paso: Number.isInteger(cobro.saldo) ? 1 : "any", porDefecto: cobro.saldo } : {}),
+      nombre: "monto", etiqueta: esAnticipo ? "Monto del anticipo (L)" : "Monto (L)", tipo: "number", requerido: true, completo: true, min: 1, paso: 1,
+      ...(cobro ? { min: Math.min(1, cobro.saldo), max: cobro.saldo, paso: Number.isInteger(cobro.saldo) ? 1 : "any", porDefecto: esAnticipo ? undefined : cobro.saldo } : {}),
       ayuda: resumen(cobro),
     },
     ...camposPagador(),
     ...camposMetodo(),
   ];
+  const titulo = esAnticipo ? "Pago anticipado" : "Pago de trabajo de taller";
   abrirFormulario({
-    titulo: cobro ? `Cobrar proyecto #${cobro.id}` : "Cobro de trabajo de taller",
-    subtitulo: cobro ? `${cobro.cliente} · ${cobro.placa} ${cobro.marca} ${cobro.modelo}` : "Pago o anticipo de un proyecto",
+    titulo: cobro ? `${titulo} · proyecto #${cobro.id}` : titulo,
+    subtitulo: cobro
+      ? `${cobro.cliente} · ${cobro.placa} ${cobro.marca} ${cobro.modelo}`
+      : esAnticipo ? "Adelanto antes de que el trabajo esté listo; se descuenta del saldo" : "Abono o pago final de un proyecto",
     campos,
     valores: cobro ? separarNombre(cobro.cliente) : {},
-    textoBoton: "Registrar pago",
+    textoBoton: esAnticipo ? "Registrar anticipo" : "Registrar pago",
     enviar: async ({ orden_id, ...datos }) => {
-      const resultado = await api(`/ordenes/${orden_id ?? cobro.id}/pagos`, { metodo: "POST", datos });
-      const tipo = datos.tipo === "anticipo" ? "Anticipo registrado" : "Pago registrado";
-      aviso(resultado.saldo > 0 ? `${tipo}. Queda ${dinero(resultado.saldo)}` : "Proyecto pagado por completo");
+      const resultado = await api(`/ordenes/${orden_id ?? cobro.id}/pagos`, { metodo: "POST", datos: { ...datos, tipo } });
+      const hecho = esAnticipo ? "Anticipo registrado" : "Pago registrado";
+      aviso(resultado.saldo > 0 ? `${hecho}. Queda ${dinero(resultado.saldo)}` : "Proyecto pagado por completo");
     },
   });
   conectarMetodoDePago(dialogo);
 
-  // Al elegir el proyecto se ajustan el monto, el anticipo y los datos de quien paga
+  // Al elegir el proyecto se ajustan el monto y los datos de quien paga
   const monto = $("#campo-monto", dialogo);
   const ayudaMonto = monto.parentElement.querySelector(".ayuda");
-  const anticipo = dialogo.querySelector('input[name="tipo"][value="anticipo"]');
   let precargado = cobro ? separarNombre(cobro.cliente) : {};
   dialogo.querySelectorAll('input[name="orden_id"]').forEach((radio) => radio.addEventListener("change", () => {
-    const elegido = porId(conSaldo, Number(radio.value));
-    Object.assign(monto, { min: Math.min(1, elegido.saldo), max: elegido.saldo, step: Number.isInteger(elegido.saldo) ? 1 : "any", value: elegido.saldo });
+    const elegido = porId(candidatos, Number(radio.value));
+    Object.assign(monto, { min: Math.min(1, elegido.saldo), max: elegido.saldo, step: Number.isInteger(elegido.saldo) ? 1 : "any" });
+    if (!esAnticipo) monto.value = elegido.saldo;
     ayudaMonto.textContent = resumen(elegido);
-    const motivo = sinAnticipo(elegido);
-    anticipo.disabled = Boolean(motivo);
-    if (motivo && anticipo.checked) dialogo.querySelector('input[name="tipo"][value="pago"]').checked = true;
-    anticipo.closest(".opcion").classList.toggle("bloqueada", Boolean(motivo));
-    anticipo.closest(".opcion").querySelector(".motivo").textContent = motivo;
     // El nombre del cliente se precarga, pero no se pisa lo que ya escribió recepción
     const nuevo = separarNombre(elegido.cliente);
     for (const [clave, valor] of Object.entries(nuevo)) {
@@ -1255,6 +1388,7 @@ function pintarCobros() {
           <td>${insigniaPago(c.estado_pago)}</td>
           <td class="acciones-fila">
             <button type="button" class="boton boton-icono" data-pagos="${c.id}" aria-label="Ver pagos" title="Ver pagos">${icono("reloj")}</button>
+            ${c.saldo > 0 && ESTADOS_EDITABLES.includes(c.estado) ? `<button type="button" class="boton boton-secundario boton-chico" data-anticipo="${c.id}" title="Pago anticipado">${icono("anticipo")} Anticipo</button>` : ""}
             ${c.saldo > 0 ? `<button type="button" class="boton boton-secundario boton-chico" data-cobrar="${c.id}">${icono("dinero")} Cobrar</button>` : ""}
           </td></tr>`).join("")}
         </tbody></table></div>` : `<div class="vacio">${icono("dinero")}<strong>Nada por aquí</strong><span>No hay proyectos en este filtro.</span></div>`}
@@ -1265,6 +1399,61 @@ function pintarCobros() {
   );
   $("#vista").querySelectorAll("[data-cobrar]").forEach((boton) =>
     boton.addEventListener("click", () => registrarPago(porId(cobros, Number(boton.dataset.cobrar))))
+  );
+  $("#vista").querySelectorAll("[data-anticipo]").forEach((boton) =>
+    boton.addEventListener("click", () => registrarPago(porId(cobros, Number(boton.dataset.anticipo)), "anticipo"))
+  );
+  $("#vista").querySelectorAll("[data-pagos]").forEach((boton) =>
+    boton.addEventListener("click", () => verPagos(Number(boton.dataset.pagos)))
+  );
+}
+
+// ===================== Recepción: apartado de pagos anticipados =====================
+function pintarAnticipos() {
+  const { anticipos, cobros } = estado.datos;
+  const conAnticipo = new Set(anticipos.map((a) => a.orden_id));
+  // Proyectos activos con saldo: son los que todavía pueden recibir un anticipo
+  const pueden = cobros.filter((c) => c.saldo > 0 && ESTADOS_EDITABLES.includes(c.estado));
+  const sinAnticipo = pueden.filter((c) => !conAnticipo.has(c.id));
+  const total = anticipos.reduce((suma, a) => suma + a.monto, 0);
+
+  $("#vista").innerHTML = `
+    <div class="estadisticas">
+      <div class="panel estadistica"><span class="etiqueta">${icono("anticipo")} Total anticipado</span><span class="valor">${dinero(total)}</span><span class="detalle">${anticipos.length === 1 ? "1 anticipo registrado" : `${anticipos.length} anticipos registrados`}</span></div>
+      <div class="panel estadistica"><span class="etiqueta">${icono("ordenes")} Proyectos con anticipo</span><span class="valor">${conAnticipo.size}</span><span class="detalle">recibieron un adelanto</span></div>
+      <div class="panel estadistica"><span class="etiqueta">${icono("dinero")} Pueden recibir anticipo</span><span class="valor">${pueden.length}</span><span class="detalle">activos y con saldo</span></div>
+      <div class="panel estadistica alerta"><span class="etiqueta">${icono("alerta")} Activos sin anticipo</span><span class="valor">${sinAnticipo.length}</span><span class="detalle">todavía no han abonado</span></div>
+    </div>
+    <section class="panel">
+      <div class="panel-encabezado"><h2>Anticipos registrados</h2><span class="conteo">${anticipos.length}</span></div>
+      ${anticipos.length ? `<div class="tabla-contenedor"><table>
+        <thead><tr><th>Fecha</th><th>Proyecto</th><th>Cliente</th><th>Entrega</th><th>Pagó</th><th>Forma</th><th>Registró</th><th class="numero">Monto</th><th></th></tr></thead>
+        <tbody>${anticipos.map((a) => `<tr>
+          <td class="sin-saltos">${fechaHora(a.fecha)}</td>
+          <td><div class="celda-doble"><strong>#${a.orden_id} <span class="placa">${esc(a.placa)}</span></strong><span>${esc(a.marca)} ${esc(a.modelo)} · ${esc(nombreEstado(a.estado))}</span></div></td>
+          <td>${esc(a.cliente)}</td>
+          <td>${insigniaLimite(a.fecha_limite, a.estado)}</td>
+          <td>${quienPago(a)}</td><td>${detalleMetodo(a)}</td><td>${esc(a.registrado_por || "—")}</td>
+          <td class="numero"><strong>${dinero(a.monto)}</strong></td>
+          <td class="acciones-fila"><button type="button" class="boton boton-icono" data-pagos="${a.orden_id}" aria-label="Ver pagos del proyecto" title="Ver pagos del proyecto">${icono("reloj")}</button></td>
+        </tr>`).join("")}
+        </tbody></table></div>`
+        : `<div class="vacio">${icono("anticipo")}<strong>Todavía no hay anticipos</strong><span>Use «Registrar anticipo» para abonar a un proyecto que aún no está listo.</span></div>`}
+    </section>
+    <section class="panel">
+      <div class="panel-encabezado"><h2>Proyectos que pueden recibir anticipo</h2><span class="conteo">${pueden.length}</span></div>
+      ${pueden.length ? `<ul class="lista">${pueden.map((c) => `
+        <li><div class="fila-lista">
+          <span class="principal"><strong>#${c.id} · ${esc(c.placa)} · ${esc(c.marca)} ${esc(c.modelo)}</strong>
+            <span>${esc(c.cliente)} · ${esc(nombreEstado(c.estado))} · saldo ${dinero(c.saldo)}${conAnticipo.has(c.id) ? " · ya tiene anticipo" : ""}</span></span>
+          ${insigniaLimite(porId(estado.datos.ordenes, c.id)?.fecha_limite, c.estado)}
+          <button type="button" class="boton boton-secundario boton-chico" data-anticipo="${c.id}">${icono("anticipo")} Anticipo</button>
+        </div></li>`).join("")}</ul>`
+        : `<p class="vacio-chico">No hay proyectos activos con saldo.</p>`}
+    </section>`;
+
+  $("#vista").querySelectorAll("[data-anticipo]").forEach((boton) =>
+    boton.addEventListener("click", () => registrarPago(porId(cobros, Number(boton.dataset.anticipo)), "anticipo"))
   );
   $("#vista").querySelectorAll("[data-pagos]").forEach((boton) =>
     boton.addEventListener("click", () => verPagos(Number(boton.dataset.pagos)))
@@ -1850,12 +2039,13 @@ const GRUPOS_TRABAJO = [
 ];
 
 function tarjetaTrabajo(t) {
-  const categoria = t.categoria !== "estandar" ? insigniaCategoria(t.categoria) : "";
+  const categoria = insigniaCategoria(t.categoria);
   return `
     <button type="button" class="tarjeta-orden" data-trabajo="${t.id}">
       <div class="arriba"><span class="placa">${esc(t.placa)}</span>${categoria}<span class="numero-orden">#${t.id}</span></div>
       <div class="vehiculo">${esc(t.marca)} ${esc(t.modelo)} ${t.anio}</div>
       <div class="diagnostico">${esc(t.diagnostico || "Sin diagnóstico")}</div>
+      ${t.estado !== "entregado" ? `<div class="limite-tarjeta">${insigniaLimite(t.fecha_limite, t.estado)}</div>` : ""}
       <div class="abajo">${t.soy_lider
         ? `<span class="insignia insignia-lujo">${icono("estrella")}Líder</span>`
         : `<span>Equipo de ${esc(t.lider)}</span>`}
@@ -2005,6 +2195,7 @@ async function abrirTrabajo(id) {
         <div class="dato"><small>Vehículo</small><strong>${esc(trabajo.marca)} ${esc(trabajo.modelo)} ${trabajo.anio}</strong>
           <span class="mono">${esc(trabajo.placa)}</span> ${insigniaCategoria(trabajo.categoria)}</div>
         <div class="dato"><small>Cliente</small><strong>${esc(trabajo.cliente)}</strong><span>Líder: ${esc(trabajo.lider)}</span></div>
+        <div class="dato completo"><small>Fecha límite de entrega</small><strong>${trabajo.fecha_limite ? fecha(trabajo.fecha_limite) : "El cliente no especificó"}</strong>${trabajo.fecha_limite ? insigniaLimite(trabajo.fecha_limite, trabajo.estado) : ""}</div>
         <div class="dato completo"><small>Lo que tiene el auto</small><strong>${esc(trabajo.diagnostico || "Sin descripción")}</strong></div>
         ${trabajo.indicaciones ? `<div class="dato completo dato-indicaciones"><small>Indicaciones del cliente</small><strong>${esc(trabajo.indicaciones)}</strong></div>` : ""}
       </div>
@@ -2375,12 +2566,14 @@ const VISTAS_PERSONAL = {
     cuenta: () => pendientesBandeja() },
   cobros: { titulo: "Cobros", subtitulo: "Pagos y anticipos de trabajos, ventas de repuestos y saldos pendientes", icono: "dinero", pintar: pintarCobros,
     boton: "Registrar pago", nuevo: () => elegirTipoDePago(), cuenta: () => estado.datos.cobros.filter((c) => c.saldo > 0).length },
+  anticipos: { titulo: "Anticipos", subtitulo: "Pagos anticipados: adelantos de proyectos que todavía no están listos", icono: "anticipo",
+    pintar: pintarAnticipos, boton: "Registrar anticipo", nuevo: () => registrarPago(undefined, "anticipo") },
   movimientos: { titulo: "Movimientos", subtitulo: "Historial de pagos, solicitudes aceptadas y repuestos vendidos o usados", icono: "reloj", pintar: pintarMovimientos },
   repuestos: { titulo: "Almacén", subtitulo: "Inventario de repuestos; con «Enviar» se manda material a un proyecto", icono: "repuestos" },
   puntuaciones: { titulo: "Puntuaciones", subtitulo: "Créditos de los mecánicos y proyectos por calificar", icono: "estrella", pintar: pintarPuntuaciones,
     cuenta: () => estado.datos.ordenes.filter((o) => o.estado === "listo").length },
-  vehiculos: { titulo: "Vehículos", subtitulo: "Registro de vehículos; con el reloj se ve su historial", icono: "vehiculos" },
-  clientes: { titulo: "Clientes", subtitulo: "Personas que traen sus vehículos", icono: "clientes" },
+  vehiculos: { titulo: "Vehículos", subtitulo: "Organizados por escala de trabajo; con el reloj se ve su historial", icono: "vehiculos" },
+  clientes: { titulo: "Clientes", subtitulo: "Organizados por la escala de trabajo de sus autos", icono: "clientes" },
   mecanicos: { titulo: "Mecánicos", subtitulo: "Equipo de trabajo, niveles y créditos", icono: "mecanicos" },
   usuarios: { titulo: "Cuentas", subtitulo: "Accesos que entrega la empresa", icono: "usuarios", soloAdministrador: true },
 };

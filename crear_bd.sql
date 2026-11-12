@@ -64,6 +64,7 @@ CREATE TABLE ordenes_servicio (
     mano_obra     REAL NOT NULL DEFAULT 0 CHECK (mano_obra >= 0),
     calificacion  TEXT CHECK (calificacion IN ('excelente', 'bien', 'con problemas', 'rehacer')),
     indicaciones  TEXT,  -- lo que pidió o avisó el cliente; los mecánicos también lo ven
+    fecha_limite  TEXT,  -- cuándo quiere el cliente su vehículo; NULL si no lo especificó
     FOREIGN KEY (vehiculo_id) REFERENCES vehiculos(id),
     FOREIGN KEY (mecanico_id) REFERENCES mecanicos(id)
 );
@@ -320,6 +321,14 @@ INSERT INTO equipo_orden (orden_id, mecanico_id, tarea) VALUES
 UPDATE ordenes_servicio SET indicaciones = 'Llamar antes de cambiar piezas caras' WHERE id = 5;
 UPDATE ordenes_servicio SET indicaciones = 'El cliente necesita el carro el viernes' WHERE id = 11;
 
+-- Fechas límite de entrega que dieron los clientes (las demás quedaron «No especificó»)
+UPDATE ordenes_servicio SET fecha_limite = '2026-10-07' WHERE id = 3;
+UPDATE ordenes_servicio SET fecha_limite = '2026-10-15' WHERE id = 4;
+UPDATE ordenes_servicio SET fecha_limite = '2026-11-20' WHERE id = 5;
+UPDATE ordenes_servicio SET fecha_limite = '2026-11-18' WHERE id = 7;
+UPDATE ordenes_servicio SET fecha_limite = '2026-12-05' WHERE id = 10;
+UPDATE ordenes_servicio SET fecha_limite = '2026-11-14' WHERE id = 11;
+
 -- Pagos: las entregadas están pagadas y la orden 3 tiene un anticipo
 INSERT INTO pagos (orden_id, monto, metodo, referencia, registrado_por, fecha, tipo,
                    pagador_nombres, pagador_apellidos, pagador_identidad, pagador_correo,
@@ -350,4 +359,4 @@ SELECT 'repuesto_usado', r.nombre || ' × ' || d.cantidad || ' en el proyecto #'
        d.cantidad, d.repuesto_id, d.orden_id, o.fecha_ingreso || ' 08:00:00'
 FROM detalle_orden d JOIN repuestos r ON r.id = d.repuesto_id JOIN ordenes_servicio o ON o.id = d.orden_id;
 
-PRAGMA user_version = 6;
+PRAGMA user_version = 7;

@@ -490,6 +490,8 @@ td .mono, td .insignia { white-space: nowrap; }
 .pestana-filtro { display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; padding: 7px 14px; border-radius: 8px; font-weight: 700; font-size: 14px; color: var(--texto-suave); cursor: pointer; }
 .pestana-filtro.activa { background: var(--superficie); color: var(--texto); box-shadow: var(--sombra); }
 .contador-pestana { min-width: 20px; padding: 0 6px; border-radius: 99px; background: var(--acento); color: #fff; font-size: 12px; text-align: center; }
+/* Conteo informativo (no es una alerta) */
+.cuenta-pestana { min-width: 20px; padding: 0 6px; border-radius: 99px; background: var(--superficie); border: 1px solid var(--borde); color: var(--texto-tenue); font-size: 12px; text-align: center; }
 .rejilla-tarjetas { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; margin-bottom: 20px; }
 .tarjeta-bandeja { display: grid; gap: 6px; align-content: start; padding: 16px; }
 .tarjeta-bandeja .arriba { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 2px; }
@@ -577,7 +579,7 @@ td .mono, td .insignia { white-space: nowrap; }
 /* Pagos: grupos de campos según la forma de pago y opciones en línea */
 .campo[hidden] { display: none; }
 .campo-checks.en-linea .lista-opciones { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); max-height: none; overflow: visible; }
-.opciones-cobro { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.opciones-cobro { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .opcion-cobro {
   display: grid; justify-items: start; gap: 6px; padding: 18px; text-align: left; cursor: pointer;
   border: 1px solid var(--borde); border-radius: var(--radio); background: var(--superficie); color: var(--texto); font: inherit;
@@ -590,6 +592,14 @@ td .mono, td .insignia { white-space: nowrap; }
 /* Historial de movimientos */
 .sin-saltos { white-space: nowrap; }
 .col-descripcion { min-width: 280px; }
+
+/* Clientes y vehículos agrupados por escala de trabajo */
+.fila-grupo td { padding: 10px 16px; background: var(--superficie-2); border-bottom: 1px solid var(--borde); font-size: 12.5px; font-weight: 700; color: var(--texto-tenue); }
+.fila-grupo td > span:last-child { margin-left: 8px; }
+tbody tr.fila-grupo:hover td { background: var(--superficie-2); }
+
+/* Fecha límite de entrega en las tarjetas de proyecto */
+.limite-tarjeta { display: flex; }
 .enlace { padding: 0; border: 0; background: none; color: var(--acento); font: inherit; font-weight: 700; cursor: pointer; }
 .enlace:hover { text-decoration: underline; }
 .resultado-trabajo { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 20px; }

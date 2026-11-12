@@ -8,13 +8,14 @@ RUTA_SCRIPT = os.path.join(CARPETA, "crear_bd.sql")
 CARPETA_MIGRACIONES = os.path.join(CARPETA, "migraciones")
 
 # Versión de la estructura que trae crear_bd.sql y migración que lleva a cada versión
-VERSION_BD = 6
+VERSION_BD = 7
 MIGRACIONES = {
     2: "002_roles_y_creditos.sql",
     3: "003_equipos.sql",
     4: "004_recepcion.sql",
     5: "005_mensajes.sql",
     6: "006_pagos_y_movimientos.sql",
+    7: "007_fecha_limite.sql",
 }
 
 

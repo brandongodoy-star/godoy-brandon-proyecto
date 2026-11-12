@@ -164,7 +164,9 @@ class RepositorioRepuesto(RepositorioBase):
 
 class RepositorioOrden(RepositorioBase):
     tabla = "ordenes_servicio"
-    columnas = ("vehiculo_id", "mecanico_id", "fecha_ingreso", "diagnostico", "mano_obra", "indicaciones")
+    columnas = (
+        "vehiculo_id", "mecanico_id", "fecha_ingreso", "diagnostico", "mano_obra", "indicaciones", "fecha_limite"
+    )
     no_encontrado = "Orden no encontrada"
 
     # mecanico_id es el líder del trabajo; los demás miembros del equipo están en equipo_orden
@@ -594,7 +596,7 @@ class RepositorioTrabajos:
     PARTICIPA = """(o.mecanico_id = :m OR EXISTS (
         SELECT 1 FROM equipo_orden e WHERE e.orden_id = o.id AND e.mecanico_id = :m))"""
     CONSULTA = f"""
-        SELECT o.id, o.estado, o.fecha_ingreso, o.diagnostico, o.calificacion, o.indicaciones,
+        SELECT o.id, o.estado, o.fecha_ingreso, o.diagnostico, o.calificacion, o.indicaciones, o.fecha_limite,
                v.placa, v.marca, v.modelo, v.anio, v.categoria, c.nombre AS cliente,
                l.nombre AS lider, o.mecanico_id = :m AS soy_lider
         FROM ordenes_servicio o
@@ -919,6 +921,21 @@ class RepositorioPago(RepositorioBase):
             "SELECT * FROM pagos WHERE orden_id = ? ORDER BY fecha, id", (orden_id,)
         ).fetchall()
         return {**self._con_saldo(fila), "pagos": [dict(pago) for pago in pagos]}
+
+    def anticipos(self) -> list[dict]:
+        """Todos los anticipos, del más reciente al más viejo, con el proyecto al que se abonaron."""
+        filas = self.con.execute(
+            """
+            SELECT p.*, o.estado, o.fecha_limite, v.placa, v.marca, v.modelo, v.categoria, c.nombre AS cliente
+            FROM pagos p
+            JOIN ordenes_servicio o ON o.id = p.orden_id
+            JOIN vehiculos v ON v.id = o.vehiculo_id
+            JOIN clientes c ON c.id = v.cliente_id
+            WHERE p.tipo = 'anticipo'
+            ORDER BY p.fecha DESC, p.id DESC
+            """
+        ).fetchall()
+        return [dict(fila) for fila in filas]
 
     def registrar(self, orden_id: int, datos: dict, usuario: str) -> dict:
         """Registra un pago o un anticipo. Los anticipos solo antes de que el trabajo esté listo."""

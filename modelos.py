@@ -106,6 +106,8 @@ class OrdenEntrada(Entrada):
     mano_obra: float = Field(default=0, ge=0)
     # Datos relevantes que dio el cliente; también los ven los mecánicos
     indicaciones: str | None = Field(default=None, max_length=300)
+    # Cuándo quiere el cliente su vehículo de vuelta; None si no lo especificó
+    fecha_limite: date | None = None
     # mecanico_id es el líder del trabajo; equipo son los demás mecánicos que lo acompañan
     equipo: list[Annotated[int, Field(gt=0)]] = Field(default_factory=list, max_length=6)
 
@@ -115,6 +117,12 @@ class OrdenEntrada(Entrada):
         if valor > date.today():
             raise ValueError("La fecha de ingreso no puede ser futura")
         return valor
+
+    @model_validator(mode="after")
+    def limite_despues_del_ingreso(self):
+        if self.fecha_limite is not None and self.fecha_limite < self.fecha_ingreso:
+            raise ValueError("La fecha límite de entrega no puede ser anterior a la fecha de ingreso")
+        return self
 
 
 class OrdenRespuesta(OrdenEntrada):
@@ -198,6 +206,7 @@ class Trabajo(BaseModel):
     categoria: Categoria
     cliente: str
     indicaciones: str | None = None
+    fecha_limite: date | None = None
     lider: str
     soy_lider: bool
 
@@ -530,6 +539,18 @@ class CobroProyecto(BaseModel):
 
 class CobroDetalle(CobroProyecto):
     pagos: list[PagoRespuesta]
+
+
+class AnticipoRespuesta(PagoRespuesta):
+    """Un anticipo con los datos del proyecto al que se abonó."""
+
+    estado: EstadoOrden
+    placa: str
+    marca: str
+    modelo: str
+    categoria: Categoria
+    cliente: str
+    fecha_limite: date | None = None
 
 
 # ---------- Puntuaciones ----------
