@@ -85,6 +85,8 @@ def test_apartado_de_anticipos(cliente, recepcion, entrar):
     orden = crear(cliente, recepcion, "/ordenes", datos_proyecto(cliente, recepcion, fecha_limite=limite))
     ruta = f"/ordenes/{orden['id']}/pagos"
     crear(cliente, recepcion, ruta, {"monto": 300, "tipo": "anticipo", **PAGADOR})
+    for _ in range(2):
+        cliente.post(f"/ordenes/{orden['id']}/avanzar", headers=recepcion)
     crear(cliente, recepcion, ruta, {"monto": 100, "tipo": "pago", **PAGADOR})
 
     anticipos = cliente.get("/anticipos", headers=recepcion).json()

@@ -99,7 +99,7 @@ def test_datos_de_pago_invalidos(cliente, recepcion, proyecto, cambio):
 
 
 def test_transferencia_guarda_banco_y_referencia(cliente, recepcion, proyecto):
-    datos = {"monto": 100, "metodo": "transferencia", "banco": "BAC Credomatic", "referencia": "TRF-55", **PAGADOR}
+    datos = {"monto": 100, "tipo": "anticipo", "metodo": "transferencia", "banco": "BAC Credomatic", "referencia": "TRF-55", **PAGADOR}
     pago = crear(cliente, recepcion, f"/ordenes/{proyecto['orden']['id']}/pagos", datos)["pagos"][0]
     assert (pago["banco"], pago["referencia"], pago["tarjeta_ultimos4"]) == ("BAC Credomatic", "TRF-55", None)
 

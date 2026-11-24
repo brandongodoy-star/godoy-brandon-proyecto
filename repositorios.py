@@ -938,7 +938,7 @@ class RepositorioPago(RepositorioBase):
         return [dict(fila) for fila in filas]
 
     def registrar(self, orden_id: int, datos: dict, usuario: str) -> dict:
-        """Registra un pago o un anticipo. Los anticipos solo antes de que el trabajo esté listo."""
+        """Registra un pago o un anticipo: el anticipo antes de que el trabajo esté listo y el pago, después."""
         cobro = self.cobro(orden_id)
         if cobro["saldo"] <= 0:
             raise HTTPException(status_code=400, detail="Este proyecto ya está pagado")
@@ -948,6 +948,12 @@ class RepositorioPago(RepositorioBase):
             raise HTTPException(
                 status_code=400,
                 detail="Los anticipos se registran antes de que el trabajo esté listo; registre un pago",
+            )
+        # El trabajo se cobra cuando ya está listo; antes solo se aceptan anticipos
+        if datos["tipo"] == "pago" and cobro["estado"] in ESTADOS_EDITABLES:
+            raise HTTPException(
+                status_code=400,
+                detail="El trabajo todavía no está listo para cobrarse; registre un pago anticipado",
             )
         monto = round(datos["monto"], 2)
         self.crear({**datos, "monto": monto, "orden_id": orden_id, "registrado_por": usuario})

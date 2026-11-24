@@ -1029,7 +1029,9 @@ async function abrirOrden(id) {
         <div class="total"><span>Total</span><span>${dinero(total.total)}</span></div>
         <div><span>Pagado</span><span>${dinero(cobro.pagado)}</span></div>
         <div class="saldo"><span>Saldo</span><span>${dinero(cobro.saldo)} ${insigniaPago(cobro.estado_pago)}</span></div>
-        ${cobro.saldo > 0 ? `<button type="button" class="boton boton-secundario" id="cobrar-orden">${icono("dinero")} Registrar pago</button>` : ""}
+        ${cobro.saldo > 0 ? (ESTADOS_EDITABLES.includes(cobro.estado)
+          ? `<button type="button" class="boton boton-secundario" id="cobrar-orden" data-tipo="anticipo" title="El trabajo se cobra cuando esté listo">${icono("anticipo")} Registrar anticipo</button>`
+          : `<button type="button" class="boton boton-secundario" id="cobrar-orden" data-tipo="pago">${icono("dinero")} Registrar pago</button>`) : ""}
       </div>
     </div>
     <div class="dialogo-pie">
@@ -1038,7 +1040,7 @@ async function abrirOrden(id) {
         <button type="button" class="boton boton-secundario" id="editar-orden">${icono("editar")} Editar</button>` : `<span class="texto-tenue separar">${orden.estado === "entregado" ? "Proyecto cerrado" : "Ya no se puede modificar"}</span>`}
       ${siguiente ? `<button type="button" class="boton boton-primario" id="avanzar-orden">${siguiente.clave === "entregado" ? "Calificar y entregar" : `Pasar a «${siguiente.nombre}»`} ${icono("flecha")}</button>` : ""}
     </div>`, (raiz) => {
-    $("#cobrar-orden", raiz)?.addEventListener("click", () => registrarPago(cobro));
+    $("#cobrar-orden", raiz)?.addEventListener("click", (e) => registrarPago(cobro, e.currentTarget.dataset.tipo));
     $("#mensaje-equipo", raiz)?.addEventListener("click", () =>
       nuevoMensaje({ mecanico_ids: [orden.mecanico_id, ...orden.equipo], orden_id: orden.id })
     );
@@ -1187,7 +1189,7 @@ async function elegirTipoDePago() {
     <div class="dialogo-encabezado"><div><h2>¿Qué se va a pagar?</h2><p>Elija el tipo de cobro</p></div></div>
     <div class="dialogo-cuerpo"><div class="opciones-cobro">
       <button type="button" class="opcion-cobro" data-respuesta="producto">${icono("repuestos")}<strong>Producto individual</strong><span>Venta de un repuesto suelto del almacén</span></button>
-      <button type="button" class="opcion-cobro" data-respuesta="trabajo">${icono("ordenes")}<strong>Trabajo de taller</strong><span>Pago de un proyecto (servicio)</span></button>
+      <button type="button" class="opcion-cobro" data-respuesta="trabajo">${icono("ordenes")}<strong>Trabajo de taller</strong><span>Pago de un proyecto ya listo (servicio)</span></button>
       <button type="button" class="opcion-cobro" data-respuesta="anticipo">${icono("anticipo")}<strong>Pago anticipado</strong><span>Adelanto de un proyecto que todavía no está listo</span></button>
     </div></div>
     <div class="dialogo-pie"><button type="button" class="boton boton-secundario" data-respuesta="">Cancelar</button></div>`);
@@ -1200,14 +1202,19 @@ async function elegirTipoDePago() {
  *  Sin `cobro`, primero se elige el proyecto entre los que pueden recibirlo. */
 function registrarPago(cobro, tipo = "pago") {
   const esAnticipo = tipo === "anticipo";
-  // Un anticipo solo se acepta antes de que el trabajo esté listo
-  const candidatos = estado.datos.cobros.filter((c) => c.saldo > 0 && (!esAnticipo || ESTADOS_EDITABLES.includes(c.estado)));
-  if (cobro && esAnticipo && !ESTADOS_EDITABLES.includes(cobro.estado)) {
+  // El anticipo es antes de que el trabajo esté listo; el pago, solo cuando ya está listo o entregado
+  const activo = (c) => ESTADOS_EDITABLES.includes(c.estado);
+  const candidatos = estado.datos.cobros.filter((c) => c.saldo > 0 && (esAnticipo ? activo(c) : !activo(c)));
+  if (cobro && esAnticipo && !activo(cobro)) {
     aviso("El trabajo ya está terminado: registre un pago, no un anticipo", "error");
     return;
   }
+  if (cobro && !esAnticipo && activo(cobro)) {
+    aviso("El trabajo todavía no está listo para cobrarse; puede registrar un pago anticipado", "error");
+    return;
+  }
   if (!cobro && !candidatos.length) {
-    aviso(esAnticipo ? "No hay proyectos activos con saldo para un anticipo" : "No hay proyectos con saldo pendiente", "error");
+    aviso(esAnticipo ? "No hay proyectos activos con saldo para un anticipo" : "No hay trabajos listos con saldo por cobrar", "error");
     return;
   }
   const limiteDe = (c) => porId(estado.datos.ordenes, c.id)?.fecha_limite;
@@ -1236,7 +1243,7 @@ function registrarPago(cobro, tipo = "pago") {
     titulo: cobro ? `${titulo} · proyecto #${cobro.id}` : titulo,
     subtitulo: cobro
       ? `${cobro.cliente} · ${cobro.placa} ${cobro.marca} ${cobro.modelo}`
-      : esAnticipo ? "Adelanto antes de que el trabajo esté listo; se descuenta del saldo" : "Abono o pago final de un proyecto",
+      : esAnticipo ? "Adelanto antes de que el trabajo esté listo; se descuenta del saldo" : "Pago de un trabajo listo o entregado",
     campos,
     valores: cobro ? separarNombre(cobro.cliente) : {},
     textoBoton: esAnticipo ? "Registrar anticipo" : "Registrar pago",
@@ -1328,9 +1335,11 @@ async function verPagos(ordenId) {
     </div>
     <div class="dialogo-pie">
       <button type="button" class="boton boton-secundario separar" data-cerrar>Cerrar</button>
-      ${cobro.saldo > 0 ? `<button type="button" class="boton boton-primario" id="cobrar-desde-pagos">${icono("dinero")} Registrar pago</button>` : ""}
+      ${cobro.saldo > 0 ? (ESTADOS_EDITABLES.includes(cobro.estado)
+        ? `<button type="button" class="boton boton-primario" id="cobrar-desde-pagos" data-tipo="anticipo">${icono("anticipo")} Registrar anticipo</button>`
+        : `<button type="button" class="boton boton-primario" id="cobrar-desde-pagos" data-tipo="pago">${icono("dinero")} Registrar pago</button>`) : ""}
     </div>`, (raiz) => {
-    $("#cobrar-desde-pagos", raiz)?.addEventListener("click", () => registrarPago(cobro));
+    $("#cobrar-desde-pagos", raiz)?.addEventListener("click", (e) => registrarPago(cobro, e.currentTarget.dataset.tipo));
     raiz.querySelectorAll("[data-anular]").forEach((boton) =>
       boton.addEventListener("click", async () => {
         const seguro = await confirmar({ titulo: "¿Anular este pago?", texto: "El monto vuelve al saldo del proyecto.", boton: "Anular" });
@@ -1389,7 +1398,7 @@ function pintarCobros() {
           <td class="acciones-fila">
             <button type="button" class="boton boton-icono" data-pagos="${c.id}" aria-label="Ver pagos" title="Ver pagos">${icono("reloj")}</button>
             ${c.saldo > 0 && ESTADOS_EDITABLES.includes(c.estado) ? `<button type="button" class="boton boton-secundario boton-chico" data-anticipo="${c.id}" title="Pago anticipado">${icono("anticipo")} Anticipo</button>` : ""}
-            ${c.saldo > 0 ? `<button type="button" class="boton boton-secundario boton-chico" data-cobrar="${c.id}">${icono("dinero")} Cobrar</button>` : ""}
+            ${c.saldo > 0 && !ESTADOS_EDITABLES.includes(c.estado) ? `<button type="button" class="boton boton-secundario boton-chico" data-cobrar="${c.id}">${icono("dinero")} Cobrar</button>` : ""}
           </td></tr>`).join("")}
         </tbody></table></div>` : `<div class="vacio">${icono("dinero")}<strong>Nada por aquí</strong><span>No hay proyectos en este filtro.</span></div>`}
     </section>`;
@@ -1565,6 +1574,25 @@ function nuevoMensaje(valores = {}) {
   });
 }
 
+// ===================== Historial de mensajes (compartido) =====================
+/** Un mensaje como burbuja de conversación. `propio`: lo envió quien está mirando (va a la derecha). */
+function burbujaMensaje(m, { propio, quien, nota = "", nuevo = false }) {
+  return `<li class="burbuja ${propio ? "propia" : ""} ${nuevo ? "nueva" : ""}">
+      <strong>${esc(m.asunto)}</strong>
+      <p>${esc(m.texto)}</p>
+      <span class="burbuja-pie">${esc(quien)} · ${fechaHora(m.fecha)}${m.orden_id ? ` · proyecto #${m.orden_id}` : ""}${nota ? ` · ${nota}` : ""}</span>
+    </li>`;
+}
+
+/** Filtro del historial: todos, solo los recibidos o solo los enviados por quien mira. */
+const FILTROS_HISTORIAL = [["todos", "Todos"], ["recibidos", "Recibidos"], ["enviados", "Enviados"]];
+const pestanasHistorial = (actual) => `<div class="pestanas-filtro" role="tablist" aria-label="Filtrar historial">
+    ${FILTROS_HISTORIAL.map(([clave, texto]) => `<button type="button" class="pestana-filtro ${clave === actual ? "activa" : ""}" data-historial="${clave}">${texto}</button>`).join("")}
+  </div>`;
+
+/** Deja cada hilo mostrando lo más reciente (abajo), como en un chat. */
+const bajarHilos = (raiz) => raiz.querySelectorAll(".hilo").forEach((hilo) => (hilo.scrollTop = hilo.scrollHeight));
+
 // ===================== Recepción: bandeja =====================
 const PESTANAS_BANDEJA = [
   { clave: "peticiones", titulo: "Peticiones de material", cuenta: () => estado.datos.peticiones.filter((p) => p.estado === "pendiente").length },
@@ -1619,32 +1647,71 @@ function pintarBandeja() {
           ${r.estado === "abierto" ? `<div class="acciones-tarjeta"><button type="button" class="boton boton-secundario boton-chico" data-resolver="${r.id}">${icono("check")} ${r.sobre_mecanico ? "Resolver y decidir créditos" : "Marcar resuelto"}</button></div>` : ""}
         </article>`).join("")}</div>` : `<div class="panel vacio">${icono("reporte")}<strong>Sin reportes abiertos</strong><span>Los reportes de los mecánicos y de los líderes llegan aquí.</span></div>`}`;
   } else if (pestana === "mensajes") {
-    // «Recibidos»: lo que escriben los mecánicos con proyecto activo; «Enviados»: lo que manda recepción
-    const caja = estado.cajaMensajes ?? "recibidos";
-    const lista = estado.datos.mensajes.filter((m) => m.direccion === (caja === "recibidos" ? "a_recepcion" : "a_mecanico"));
-    const sinLeer = mensajesSinLeer().length;
+    // Arriba los mensajes nuevos de los mecánicos; abajo el historial completo, una conversación por mecánico
+    const nuevos = mensajesSinLeer();
+    const filtro = estado.filtroHistorial ?? "todos";
+    const entra = (m) => filtro === "todos" || (filtro === "recibidos") === (m.direccion === "a_recepcion");
+    const conversaciones = new Map();
+    for (const m of [...estado.datos.mensajes].sort((a, b) => a.id - b.id)) {
+      if (!entra(m)) continue;
+      if (!conversaciones.has(m.mecanico_id)) conversaciones.set(m.mecanico_id, { id: m.mecanico_id, mecanico: m.mecanico, mensajes: [] });
+      conversaciones.get(m.mecanico_id).mensajes.push(m);
+    }
+    const lista = [...conversaciones.values()].sort((a, b) => b.mensajes.at(-1).id - a.mensajes.at(-1).id);
+    estado.conversacionesAbiertas ??= new Set();
+    const termino = (estado.buscarHistorial ?? "").toLowerCase();
+    const textoDe = (c) => `${c.mecanico} ${c.mensajes.map((m) => `${m.asunto} ${m.texto}`).join(" ")}`.toLowerCase();
+
     contenido = `
       <section class="panel">
-        <div class="panel-encabezado">
-          <div class="pestanas-filtro" role="tablist">
-            <button type="button" class="pestana-filtro ${caja === "recibidos" ? "activa" : ""}" data-caja="recibidos">Recibidos${sinLeer ? ` <span class="contador-pestana">${sinLeer}</span>` : ""}</button>
-            <button type="button" class="pestana-filtro ${caja === "enviados" ? "activa" : ""}" data-caja="enviados">Enviados</button>
-          </div>
+        <div class="panel-encabezado"><h2>Mensajes nuevos <span class="conteo">${nuevos.length}</span></h2>
           <button type="button" class="boton boton-primario boton-chico" id="nuevo-mensaje">${icono("mas")} Nuevo mensaje</button></div>
-        ${lista.length ? `<ul class="lista">${lista.map((m) => caja === "recibidos" ? `
-          <li class="${m.leido ? "" : "no-leida"}"><div class="fila-lista fila-mensaje"><span class="avatar">${esc(iniciales(m.mecanico))}</span>
+        ${nuevos.length ? `<ul class="lista">${nuevos.map((m) => `
+          <li class="no-leida"><div class="fila-lista fila-mensaje"><span class="avatar">${esc(iniciales(m.mecanico))}</span>
             <span class="principal"><strong>${esc(m.asunto)}</strong><span>De ${esc(m.mecanico)} · ${fechaHora(m.fecha)}${m.orden_id ? ` · proyecto #${m.orden_id}` : ""}</span>
               <span class="texto-mensaje">${esc(m.texto)}</span></span>
             <span class="acciones-mensaje">
               ${m.orden_id ? `<button type="button" class="boton boton-icono" data-ver-proyecto="${m.orden_id}" aria-label="Ver proyecto" title="Ver proyecto">${icono("ordenes")}</button>` : ""}
               <button type="button" class="boton boton-icono" data-responder="${m.id}" aria-label="Responder" title="Responder">${icono("enviar")}</button>
-              ${m.leido ? "" : `<button type="button" class="boton boton-icono" data-mensaje-leido="${m.id}" aria-label="Marcar como leído" title="Marcar como leído">${icono("check")}</button>`}
-            </span></div></li>` : `
-          <li><div class="fila-lista fila-mensaje"><span class="avatar">${esc(iniciales(m.mecanico))}</span>
-            <span class="principal"><strong>${esc(m.asunto)}</strong><span>Para ${esc(m.mecanico)} · ${fechaHora(m.fecha)}${m.orden_id ? ` · proyecto #${m.orden_id}` : ""}</span>
-              <span class="texto-mensaje">${esc(m.texto)}</span></span>
-            <span class="insignia ${m.leido ? "insignia-ok" : "insignia-neutra"}">${m.leido ? "Leído" : "Sin leer"}</span></div></li>`).join("")}</ul>`
-          : `<p class="vacio-chico">${caja === "recibidos" ? "Los mecánicos con un proyecto activo pueden escribirle desde su bandeja." : "Todavía no ha enviado mensajes."}</p>`}
+              <button type="button" class="boton boton-icono" data-mensaje-leido="${m.id}" aria-label="Marcar como leído (pasa al historial)" title="Marcar como leído (pasa al historial)">${icono("check")}</button>
+            </span></div></li>`).join("")}</ul>`
+          : `<p class="vacio-chico">No hay mensajes nuevos. Los leídos quedan guardados en el historial.</p>`}
+      </section>
+      <section class="panel">
+        <div class="panel-encabezado"><h2>Historial de mensajes</h2><span class="conteo">${estado.datos.mensajes.length} en total</span></div>
+        <div class="barra-herramientas">
+          <label class="buscador">${icono("buscar")}
+            <input id="buscar-historial" type="search" placeholder="Buscar mecánico, asunto o texto…" value="${esc(estado.buscarHistorial ?? "")}" aria-label="Buscar en el historial" />
+          </label>
+          ${pestanasHistorial(filtro)}
+        </div>
+        ${lista.length ? `<div class="conversaciones">${lista.map((c) => {
+          const ultimo = c.mensajes.at(-1);
+          const sinLeer = c.mensajes.filter((m) => m.direccion === "a_recepcion" && !m.leido).length;
+          return `
+          <details class="conversacion" data-conversacion="${c.id}" data-texto="${esc(textoDe(c))}" ${estado.conversacionesAbiertas.has(c.id) ? "open" : ""} ${termino && !textoDe(c).includes(termino) ? "hidden" : ""}>
+            <summary>
+              <span class="avatar">${esc(iniciales(c.mecanico))}</span>
+              <span class="principal"><strong>${esc(c.mecanico)}</strong>
+                <span>${c.mensajes.length} ${c.mensajes.length === 1 ? "mensaje" : "mensajes"} · último: ${ultimo.direccion === "a_mecanico" ? "Recepción: " : ""}${esc(ultimo.asunto)}</span></span>
+              ${sinLeer ? `<span class="contador-pestana" title="Sin leer">${sinLeer}</span>` : ""}
+              <span class="texto-tenue fecha-conversacion">${fechaHora(ultimo.fecha)}</span>
+            </summary>
+            <ul class="hilo">${c.mensajes.map((m) => {
+              const propio = m.direccion === "a_mecanico";
+              return burbujaMensaje(m, {
+                propio,
+                quien: propio ? `${m.remitente} → ${m.mecanico}` : m.mecanico,
+                nota: propio ? (m.leido ? "Leído" : "Sin leer") : m.leido ? "" : "Nuevo",
+                nuevo: !propio && !m.leido,
+              });
+            }).join("")}</ul>
+            <div class="pie-conversacion">
+              <button type="button" class="boton boton-secundario boton-chico" data-responder-a="${c.id}">${icono("enviar")} Escribir a ${esc(c.mecanico)}</button>
+            </div>
+          </details>`;
+        }).join("")}</div>`
+          : `<p class="vacio-chico">${filtro === "todos" ? "Todavía no hay mensajes." : "No hay mensajes en este filtro."}</p>`}
       </section>`;
   } else {
     const avisos = estado.datos.notificaciones;
@@ -1719,7 +1786,25 @@ function pintarBandeja() {
     });
   });
   $("#nuevo-mensaje")?.addEventListener("click", () => nuevoMensaje());
-  accion("[data-caja]", (b) => { estado.cajaMensajes = b.dataset.caja; pintarBandeja(); });
+  accion("[data-historial]", (b) => { estado.filtroHistorial = b.dataset.historial; pintarBandeja(); });
+  accion("[data-responder-a]", (b) => {
+    const id = Number(b.dataset.responderA);
+    const ultimo = estado.datos.mensajes.find((m) => m.mecanico_id === id);
+    nuevoMensaje({ mecanico_ids: [id], orden_id: ultimo?.orden_id ?? null });
+  });
+  // Recuerda qué conversaciones están abiertas para que sigan abiertas al refrescar
+  vista.querySelectorAll("[data-conversacion]").forEach((d) => d.addEventListener("toggle", () => {
+    const id = Number(d.dataset.conversacion);
+    if (d.open) estado.conversacionesAbiertas.add(id);
+    else estado.conversacionesAbiertas.delete(id);
+    bajarHilos(d);
+  }));
+  $("#buscar-historial")?.addEventListener("input", (e) => {
+    estado.buscarHistorial = e.target.value;
+    const termino = e.target.value.trim().toLowerCase();
+    vista.querySelectorAll("[data-conversacion]").forEach((d) => (d.hidden = Boolean(termino) && !d.dataset.texto.includes(termino)));
+  });
+  bajarHilos(vista);
   accion("[data-mensaje-leido]", async (b) => {
     if (await intentar(() => api(`/mensajes/${b.dataset.mensajeLeido}/leido`, { metodo: "POST" }))) await refrescar();
   });
@@ -2308,32 +2393,49 @@ const trabajosActivos = () => estado.datos.trabajos.filter((t) => ESTADOS_EDITAB
 
 function pintarBandejaMecanico() {
   const { mensajes } = estado.datos;
-  const sinLeer = mensajes.filter((m) => m.direccion === "a_mecanico" && !m.leido).length;
+  const nuevos = mensajes.filter((m) => m.direccion === "a_mecanico" && !m.leido);
   const puedeEscribir = trabajosActivos().length > 0;
+  const filtro = estado.filtroHistorial ?? "todos";
+  // Historial: toda la conversación con recepción, de la más vieja (arriba) a la más nueva (abajo)
+  const historial = [...mensajes].sort((a, b) => a.id - b.id)
+    .filter((m) => filtro === "todos" || (filtro === "recibidos") === (m.direccion === "a_mecanico"));
+  const botonProyecto = (m) => (m.orden_id && porId(estado.datos.trabajos, m.orden_id)
+    ? `<button type="button" class="boton boton-icono" data-abrir-trabajo="${m.orden_id}" aria-label="Ver proyecto" title="Ver proyecto">${icono("ordenes")}</button>` : "");
+
   $("#vista").innerHTML = `
     <section class="panel">
-      <div class="panel-encabezado"><h2>Mensajes con recepción</h2>
+      <div class="panel-encabezado"><h2>Mensajes nuevos <span class="conteo">${nuevos.length}</span></h2>
         <div class="acciones-encabezado">
-          ${sinLeer ? `<button type="button" class="boton boton-secundario boton-chico" id="leer-mensajes">Marcar todo como leído</button>` : ""}
+          ${nuevos.length ? `<button type="button" class="boton boton-secundario boton-chico" id="leer-mensajes">Marcar todo como leído</button>` : ""}
           <button type="button" class="boton boton-primario boton-chico" id="escribir-recepcion" ${puedeEscribir ? "" : "disabled"}
             title="${puedeEscribir ? "Pida material, herramientas o avise algo" : "Solo con un proyecto activo"}">${icono("enviar")} Escribir a recepción</button>
         </div></div>
       ${puedeEscribir ? "" : `<p class="nota-bandeja">${icono("candado")} Podrá escribir a recepción cuando tenga un proyecto activo (recibido o en reparación).</p>`}
-      ${mensajes.length ? `<ul class="lista">${mensajes.map((m) => {
-        const propio = m.direccion === "a_recepcion";
-        return `
-        <li class="${propio || m.leido ? "" : "no-leida"} ${propio ? "mensaje-propio" : ""}"><div class="fila-lista fila-mensaje">
-          <span class="avatar">${icono(propio ? "enviar" : "bandeja")}</span>
+      ${nuevos.length ? `<ul class="lista">${nuevos.map((m) => `
+        <li class="no-leida"><div class="fila-lista fila-mensaje">
+          <span class="avatar">${icono("bandeja")}</span>
           <span class="principal"><strong>${esc(m.asunto)}</strong>
-            <span>${propio ? "Usted → Recepción" : `De ${esc(m.remitente)}`} · ${fechaHora(m.fecha)}${m.orden_id ? ` · proyecto #${m.orden_id}` : ""}</span>
+            <span>De ${esc(m.remitente)} · ${fechaHora(m.fecha)}${m.orden_id ? ` · proyecto #${m.orden_id}` : ""}</span>
             <span class="texto-mensaje">${esc(m.texto)}</span></span>
           <span class="acciones-mensaje">
-            ${m.orden_id && porId(estado.datos.trabajos, m.orden_id) ? `<button type="button" class="boton boton-icono" data-abrir-trabajo="${m.orden_id}" aria-label="Ver proyecto" title="Ver proyecto">${icono("ordenes")}</button>` : ""}
-            ${propio ? `<span class="insignia ${m.leido ? "insignia-ok" : "insignia-neutra"}">${m.leido ? "Leído" : "Enviado"}</span>`
-              : m.leido ? "" : `<button type="button" class="boton boton-icono" data-leido="${m.id}" aria-label="Marcar como leído" title="Marcar como leído">${icono("check")}</button>`}
-          </span></div></li>`;
+            ${botonProyecto(m)}
+            <button type="button" class="boton boton-icono" data-leido="${m.id}" aria-label="Marcar como leído (pasa al historial)" title="Marcar como leído (pasa al historial)">${icono("check")}</button>
+          </span></div></li>`).join("")}</ul>`
+        : `<p class="vacio-chico">No tiene mensajes nuevos. Los leídos quedan guardados en el historial.</p>`}
+    </section>
+    <section class="panel">
+      <div class="panel-encabezado"><h2>Historial con recepción</h2><span class="conteo">${mensajes.length} en total</span></div>
+      <div class="barra-herramientas">${pestanasHistorial(filtro)}</div>
+      ${historial.length ? `<ul class="hilo hilo-alto">${historial.map((m) => {
+        const propio = m.direccion === "a_recepcion";
+        return burbujaMensaje(m, {
+          propio,
+          quien: propio ? "Usted → Recepción" : m.remitente,
+          nota: propio ? (m.leido ? "Leído por recepción" : "Enviado") : m.leido ? "" : "Nuevo",
+          nuevo: !propio && !m.leido,
+        });
       }).join("")}</ul>`
-        : `<div class="vacio">${icono("bandeja")}<strong>Sin mensajes</strong><span>Aquí le llegan los mensajes de recepción y los reportes sobre su trabajo.</span></div>`}
+        : `<div class="vacio">${icono("bandeja")}<strong>${filtro === "todos" ? "Sin mensajes" : "Nada en este filtro"}</strong><span>Aquí queda guardado todo lo que habla con recepción, y los reportes sobre su trabajo.</span></div>`}
     </section>`;
 
   $("#vista").querySelectorAll("[data-leido]").forEach((b) => b.addEventListener("click", async () => {
@@ -2342,10 +2444,14 @@ function pintarBandejaMecanico() {
   $("#vista").querySelectorAll("[data-abrir-trabajo]").forEach((b) =>
     b.addEventListener("click", () => abrirTrabajo(Number(b.dataset.abrirTrabajo)))
   );
+  $("#vista").querySelectorAll("[data-historial]").forEach((b) =>
+    b.addEventListener("click", () => { estado.filtroHistorial = b.dataset.historial; pintarBandejaMecanico(); })
+  );
   $("#leer-mensajes")?.addEventListener("click", async () => {
     if (await intentar(() => api("/mecanico/mensajes/leer-todos", { metodo: "POST" }))) await refrescar();
   });
   $("#escribir-recepcion")?.addEventListener("click", () => escribirARecepcion());
+  bajarHilos($("#vista"));
 }
 
 /** El mecánico con un proyecto activo le escribe a recepción (pedir cosas, avisar algo). */
@@ -2587,7 +2693,7 @@ for (const clave of Object.keys(MODULOS)) {
 const VISTAS_MECANICO = {
   trabajos: { titulo: "Mis trabajos", subtitulo: "Vehículos que le asignó recepción", icono: "ordenes", pintar: pintarTrabajos,
     cuenta: () => estado.datos.trabajos.filter((t) => ESTADOS_EDITABLES.includes(t.estado)).length },
-  bandeja: { titulo: "Bandeja", subtitulo: "Mensajes con recepción", icono: "bandeja", pintar: pintarBandejaMecanico,
+  bandeja: { titulo: "Bandeja", subtitulo: "Mensajes nuevos e historial de la conversación con recepción", icono: "bandeja", pintar: pintarBandejaMecanico,
     cuenta: () => estado.datos.mensajes.filter((m) => m.direccion === "a_mecanico" && !m.leido).length },
   reportes: { titulo: "Reportes", subtitulo: "Avise a recepción lo que pase con el equipo o el taller", icono: "reporte", pintar: pintarReportes,
     cuenta: () => estado.datos.reportes.filter((r) => r.estado === "abierto").length },

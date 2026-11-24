@@ -576,6 +576,26 @@ td .mono, td .insignia { white-space: nowrap; }
 .nota-bandeja { display: flex; align-items: center; gap: 8px; margin: 0; padding: 10px 20px; font-size: 13px; color: var(--texto-tenue); border-bottom: 1px solid var(--borde); }
 .nota-bandeja .icono { width: 16px; height: 16px; flex: none; }
 
+/* Historial de mensajes: conversaciones con burbujas, lo más nuevo abajo */
+.conversaciones { display: grid; }
+.conversacion { border-top: 1px solid var(--borde); }
+.conversacion summary { display: flex; align-items: center; gap: 12px; padding: 12px 20px; cursor: pointer; list-style: none; }
+.conversacion summary::-webkit-details-marker { display: none; }
+.conversacion summary:hover { background: var(--superficie-2); }
+.conversacion summary .principal { flex: 1; min-width: 0; display: grid; }
+.conversacion summary .principal span { font-size: 12.5px; color: var(--texto-tenue); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conversacion[open] summary { background: var(--superficie-2); }
+.fecha-conversacion { font-size: 12px; white-space: nowrap; }
+.hilo { list-style: none; margin: 0; padding: 16px 20px; display: flex; flex-direction: column; gap: 10px; max-height: 420px; overflow-y: auto; }
+.hilo-alto { max-height: 560px; border-top: 1px solid var(--borde); }
+.burbuja { max-width: min(560px, 85%); align-self: flex-start; display: grid; gap: 2px; padding: 10px 14px; border-radius: 14px 14px 14px 4px; background: var(--superficie-2); border: 1px solid var(--borde); }
+.burbuja.propia { align-self: flex-end; border-radius: 14px 14px 4px 14px; background: var(--acento-suave); border-color: transparent; }
+.burbuja.nueva { border-color: var(--acento); }
+.burbuja strong { font-size: 13.5px; }
+.burbuja p { margin: 2px 0 4px; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.burbuja-pie { font-size: 11.5px; color: var(--texto-tenue); }
+.pie-conversacion { display: flex; justify-content: flex-end; padding: 0 20px 14px; }
+
 /* Pagos: grupos de campos según la forma de pago y opciones en línea */
 .campo[hidden] { display: none; }
 .campo-checks.en-linea .lista-opciones { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); max-height: none; overflow: visible; }
@@ -698,4 +718,6 @@ tbody tr.fila-grupo:hover td { background: var(--superficie-2); }
   .pedir-material { grid-template-columns: 1fr 80px; }
   .historial-montos { display: none; }
   .opciones-cobro { grid-template-columns: 1fr; }
+  .burbuja { max-width: 92%; }
+  .fecha-conversacion { display: none; }
 }

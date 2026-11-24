@@ -45,7 +45,7 @@ No hay registro público: las cuentas las entrega la empresa. La primera vez se 
 El mecánico entra a una interfaz limitada, sin precios ni datos de contacto de los clientes:
 
 - **Mis trabajos:** los vehículos que le asignó recepción, como líder o como parte del equipo. Cada proyecto muestra su descripción (el auto, lo que tiene y las indicaciones del cliente) y los **problemas que surgieron**: los avisos que el equipo mandó a recepción mientras trabajaba (por ejemplo, «falta un repuesto»).
-- **Bandeja:** los mensajes de recepción (por ejemplo, «Material enviado» cuando aceptan una petición) y los reportes que el líder hizo sobre él, con lo que decidió recepción. Mientras tenga un proyecto activo puede **escribir a recepción** para pedir cosas o avisar algo; sin proyecto activo el botón queda bloqueado.
+- **Bandeja:** arriba los mensajes nuevos y abajo el **historial** de toda la conversación con recepción (lo que recibió y lo que envió). Ahí llegan los mensajes de recepción (por ejemplo, «Material enviado» cuando aceptan una petición) y los reportes que el líder hizo sobre él, con lo que decidió recepción. Mientras tenga un proyecto activo puede **escribir a recepción** para pedir cosas o avisar algo; sin proyecto activo el botón queda bloqueado.
 - **Reportes:** informa fallas de equipo o herramientas, falta de repuestos, problemas de seguridad u otros. También llegan a recepción.
 - **Mi perfil:** sus datos personales, sus números, su historial de créditos y el cambio de contraseña.
 
@@ -95,8 +95,8 @@ Recepción (y administración) tiene más poder que los mecánicos:
 | Sección | Qué hace |
 |---|---|
 | **Proyectos** | Proyectos de trabajo: vehículo, datos del cliente, problema, **indicaciones del cliente** (los mecánicos también las ven) y **fecha límite de entrega** (la que pide el cliente, o «No especificó»). Al elegir el vehículo, el formulario marca solo la **escala del trabajo** (Estándar, Premium o Lujo); si se toca una escala, la lista de vehículos muestra solo los de esa escala. Las tarjetas avisan si la entrega está cerca o vencida. Los mecánicos se eligen en dos apartados con buscador: **Líder** y **Acompañantes**. Al abrir un proyecto se ven su costo, lo pagado, el saldo, los problemas que surgieron y un botón para mandar un mensaje a su equipo. |
-| **Bandeja** | Recibe lo que mandan los mecánicos: **peticiones de material** («Aceptar y enviar» descuenta el material del almacén, lo agrega al proyecto y le avisa al mecánico; o rechazar con un motivo), **reportes** (en los del líder, recepción decide cuántos créditos bajar al reportado) y **avisos** (trabajo listo, problemas que surgieron). En **Mensajes** están los *Recibidos* de los mecánicos (se pueden responder) y los *Enviados* a uno o varios mecánicos. |
-| **Cobros** | Total, pagado y saldo de cada proyecto. **Registrar pago** abre una ventana con tres opciones: **producto individual** (venta de un repuesto suelto del almacén), **trabajo de taller** (pago de un proyecto) o **pago anticipado**. En cada pago, anticipo o venta se piden los datos de quien paga (nombres, apellidos, identidad y correo opcional) y la forma de pago: con **tarjeta**, la marca, los últimos 4 dígitos, el titular y el número de autorización (nunca el número completo ni el código de seguridad); con **transferencia**, el banco y la referencia. Solo administración puede anular un pago. |
+| **Bandeja** | Recibe lo que mandan los mecánicos: **peticiones de material** («Aceptar y enviar» descuenta el material del almacén, lo agrega al proyecto y le avisa al mecánico; o rechazar con un motivo), **reportes** (en los del líder, recepción decide cuántos créditos bajar al reportado) y **avisos** (trabajo listo, problemas que surgieron). En **Mensajes**, arriba están los **mensajes nuevos** de los mecánicos (se responden o se marcan como leídos) y abajo el **historial**: una conversación por mecánico con todo lo enviado y recibido, del más viejo al más nuevo, con buscador y filtro (todos, recibidos o enviados). Nada se borra al leerlo. |
+| **Cobros** | Total, pagado y saldo de cada proyecto. **Registrar pago** abre una ventana con tres opciones: **producto individual** (venta de un repuesto suelto del almacén), **trabajo de taller** (pago de un proyecto) o **pago anticipado**. Un trabajo **solo se cobra cuando está listo** (o ya entregado); mientras está «recibido» o «en reparación» solo acepta anticipos. En cada pago, anticipo o venta se piden los datos de quien paga (nombres, apellidos, identidad y correo opcional) y la forma de pago: con **tarjeta**, la marca, los últimos 4 dígitos, el titular y el número de autorización (nunca el número completo ni el código de seguridad); con **transferencia**, el banco y la referencia. Solo administración puede anular un pago. |
 | **Anticipos** | Apartado propio de los **pagos anticipados**: adelantos de proyectos que todavía no están listos (solo se aceptan mientras el proyecto está «recibido» o «en reparación»). Muestra el total anticipado, cada anticipo con su proyecto, cliente, fecha de entrega y quién pagó, y los proyectos que todavía pueden recibir uno. |
 | **Movimientos** | Historial de todo lo que mueve dinero o material: pagos, anticipos, pagos anulados, ventas de repuestos, solicitudes aceptadas y repuestos usados o devueltos en los proyectos, con fecha, proyecto, cantidad, monto y quién lo hizo. Se filtra por tipo y se busca. |
 | **Almacén** | Inventario de repuestos. Con «Enviar» se manda material a un proyecto activo: se descuenta del almacén y se suma al costo. |
@@ -104,7 +104,7 @@ Recepción (y administración) tiene más poder que los mecánicos:
 | **Vehículos** | Registro de vehículos **organizado por escala de trabajo** (Estándar, Premium, Lujo), con pestañas para filtrar. Con el reloj se abre su **historial**: todos sus proyectos, cuánto se ha gastado y cuánto se debe. |
 | **Clientes** | Organizados por la **escala de trabajo de sus autos** (la más alta si tiene varios); los que aún no tienen vehículo van aparte. |
 
-Entregar un proyecto con saldo pendiente es posible: el sistema avisa cuánto debe el cliente, y el saldo queda en Cobros.
+El cobro del trabajo empieza cuando el líder lo marca listo; antes, el cliente solo puede dejar anticipos. Entregar un proyecto con saldo pendiente es posible: el sistema avisa cuánto debe el cliente, y el saldo queda en Cobros.
 
 ## Interfaz web
 
@@ -113,7 +113,7 @@ La carpeta `frontend/` tiene la página que FastAPI sirve en la raíz (`index.ht
 - **Administración y recepción:** Resumen, Proyectos (tablero por estado), Bandeja, Cobros, Anticipos, Movimientos, Almacén, Puntuaciones, Vehículos, Clientes y Mecánicos. **Cuentas** es solo para administración, y solo ella ve los botones de editar y eliminar en Clientes y Vehículos.
 - **Mecánico:** el área descrita arriba.
 
-La página pide sus archivos con un número de versión (`app.js?v=10`). Si se cambian, hay que subir ese número en `index.html` para que los navegadores bajen la versión nueva.
+La página pide sus archivos con un número de versión (`app.js?v=12`). Si se cambian, hay que subir ese número en `index.html` para que los navegadores bajen la versión nueva.
 
 Tiene modo claro u oscuro y diseño adaptado al celular. La sesión se guarda solo mientras la pestaña esté abierta.
 

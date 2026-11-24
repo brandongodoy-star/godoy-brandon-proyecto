@@ -87,6 +87,12 @@ def test_cobro_en_partes_hasta_pagar(cliente, recepcion, proyecto):
     assert (anticipo["pagado"], anticipo["saldo"], anticipo["estado_pago"]) == (200, 300, "parcial")
     assert anticipo["pagos"][0]["registrado_por"] == "recepcion"
 
+    # Mientras no esté listo no se cobra el trabajo: solo se aceptan anticipos
+    r = cliente.post(f"{ruta}/pagos", json={"monto": 100, "metodo": "efectivo", **PAGADOR}, headers=recepcion)
+    assert r.status_code == 400 and "no está listo" in r.json()["detail"]
+    for _ in range(2):
+        cliente.post(f"{ruta}/avanzar", headers=recepcion)
+
     r = cliente.post(f"{ruta}/pagos", json={"monto": 301, "metodo": "efectivo", **PAGADOR}, headers=recepcion)
     assert r.status_code == 400 and "mayor que el saldo" in r.json()["detail"]
 
@@ -111,7 +117,8 @@ def test_lista_de_cobros_por_estado(cliente, recepcion, proyecto):
 
 
 def test_solo_la_administracion_anula_pagos(cliente, recepcion, admin, entrar, proyecto):
-    cobro = crear(cliente, recepcion, f"/ordenes/{proyecto['orden']['id']}/pagos", {"monto": 100, "metodo": "efectivo", **PAGADOR})
+    datos = {"monto": 100, "metodo": "efectivo", "tipo": "anticipo", **PAGADOR}
+    cobro = crear(cliente, recepcion, f"/ordenes/{proyecto['orden']['id']}/pagos", datos)
     pago_id = cobro["pagos"][0]["id"]
     assert cliente.delete(f"/pagos/{pago_id}", headers=recepcion).status_code == 403
     assert cliente.delete(f"/pagos/{pago_id}", headers=admin).status_code == 200
@@ -188,7 +195,8 @@ def test_ajuste_invalido(cliente, recepcion, proyecto):
 
 # ---------- Historial de vehículos ----------
 def test_historial_del_vehiculo(cliente, recepcion, proyecto):
-    crear(cliente, recepcion, f"/ordenes/{proyecto['orden']['id']}/pagos", {"monto": 150, "metodo": "efectivo", **PAGADOR})
+    datos = {"monto": 150, "metodo": "efectivo", "tipo": "anticipo", **PAGADOR}
+    crear(cliente, recepcion, f"/ordenes/{proyecto['orden']['id']}/pagos", datos)
     historial = cliente.get(f"/vehiculos/{proyecto['vehiculo']['id']}/historial", headers=recepcion).json()
     assert len(historial) == 1
     assert historial[0] == {
