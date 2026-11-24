@@ -30,13 +30,14 @@ Si ya tenías una `taller.db` de antes, la API la actualiza sola al arrancar sin
 
 ## Cuentas y roles
 
-No hay registro público: las cuentas las entrega la empresa. La primera vez se crean estas tres:
+No hay registro público: las cuentas las entrega la empresa. La primera vez se crean estas cuatro:
 
 | Usuario | Contraseña | Rol | Qué puede hacer |
 |---|---|---|---|
 | `admin` | `Admin2026!` | Administración | Todo: además edita y elimina clientes y vehículos, anula pagos y crea o elimina cuentas |
 | `recepcion` | `Recepcion2026!` | Recepción | Registra clientes y vehículos (no los edita ni elimina), y maneja mecánicos, repuestos, proyectos, cobros y mensajes |
 | `mecanico` | `Mecanico2026!` | Mecánico | Solo su área: sus trabajos, sus reportes y su perfil |
+| `auxiliar` | `Auxiliar2026!` | Auxiliar de operaciones y traslado | Solo su área: bandeja de trabajos nuevos y sus trabajos (llevar piezas, recibir producto, traer y llevar vehículos) |
 
 **Cambie estas contraseñas** después de entrar (`POST /auth/cambiar-password`, o desde «Mi perfil» en el caso del mecánico). La cuenta `mecanico` queda vinculada al primer mecánico activo. Para otros mecánicos, el administrador crea una cuenta en **Cuentas** y elige su ficha.
 
@@ -88,6 +89,17 @@ Recepción no puede poner como líder a un mecánico con menos nivel que la cate
 
 Además, desde cada trabajo cualquier miembro del equipo puede **pedir material** al almacén (repuesto, cantidad y para qué). Ve si su petición está pendiente, enviada o rechazada.
 
+## Área del auxiliar de operaciones y traslado
+
+Los auxiliares reciben los productos nuevos, llevan las piezas a los talleres y traen o llevan los vehículos:
+
+- **Bandeja:** los trabajos nuevos. Los que recepción les asigna y las piezas que se aprueban (se crean solas al aceptar una petición de material). Una tarea sin auxiliar asignado la toma el primero que la acepte.
+- **Trabajos:** lo que aceptaron. Al terminar marcan **Realizado** (con una nota opcional) y queda en su historial. Si era «Recibir producto», la cantidad entra sola al almacén.
+
+## Copias en PDF de reportes y cobros
+
+Cada reporte que se envía (de un mecánico o de un líder sobre su equipo) guarda en ese momento una **copia en PDF** junto al reporte: título, tipo, quién lo envió, fecha, proyecto y descripción. El mecánico la abre desde «Mis reportes», recepción desde la Bandeja y la administración la tiene archivada en **Administración**. Igual con los cobros: cada **pago, anticipo y venta** guarda su **comprobante en PDF** (número P-000001 o V-000001, quién pagó, concepto, forma de pago, saldo del proyecto y la nota del sistema). Se abre con «Comprobante» en Ver pagos, Ventas, Anticipos y Movimientos, y la administración tiene el archivo completo con la **nota del sistema** de cada cobro. Los PDF se generan con `pdf.py`, sin librerías externas.
+
 ## Área de recepción
 
 Recepción (y administración) tiene más poder que los mecánicos:
@@ -95,9 +107,10 @@ Recepción (y administración) tiene más poder que los mecánicos:
 | Sección | Qué hace |
 |---|---|
 | **Proyectos** | Proyectos de trabajo: vehículo, datos del cliente, problema, **indicaciones del cliente** (los mecánicos también las ven) y **fecha límite de entrega** (la que pide el cliente, o «No especificó»). Al elegir el vehículo, el formulario marca solo la **escala del trabajo** (Estándar, Premium o Lujo); si se toca una escala, la lista de vehículos muestra solo los de esa escala. Las tarjetas avisan si la entrega está cerca o vencida. Los mecánicos se eligen en dos apartados con buscador: **Líder** y **Acompañantes**. Al abrir un proyecto se ven su costo, lo pagado, el saldo, los problemas que surgieron y un botón para mandar un mensaje a su equipo. |
-| **Bandeja** | Recibe lo que mandan los mecánicos: **peticiones de material** («Aceptar y enviar» descuenta el material del almacén, lo agrega al proyecto y le avisa al mecánico; o rechazar con un motivo), **reportes** (en los del líder, recepción decide cuántos créditos bajar al reportado) y **avisos** (trabajo listo, problemas que surgieron). En **Mensajes**, arriba están los **mensajes nuevos** de los mecánicos (se responden o se marcan como leídos) y abajo el **historial**: una conversación por mecánico con todo lo enviado y recibido, del más viejo al más nuevo, con buscador y filtro (todos, recibidos o enviados). Nada se borra al leerlo. |
-| **Cobros** | Total, pagado y saldo de cada proyecto. **Registrar pago** abre una ventana con tres opciones: **producto individual** (venta de un repuesto suelto del almacén), **trabajo de taller** (pago de un proyecto) o **pago anticipado**. Un trabajo **solo se cobra cuando está listo** (o ya entregado); mientras está «recibido» o «en reparación» solo acepta anticipos. En cada pago, anticipo o venta se piden los datos de quien paga (nombres, apellidos, identidad y correo opcional) y la forma de pago: con **tarjeta**, la marca, los últimos 4 dígitos, el titular y el número de autorización (nunca el número completo ni el código de seguridad); con **transferencia**, el banco y la referencia. Solo administración puede anular un pago. |
-| **Anticipos** | Apartado propio de los **pagos anticipados**: adelantos de proyectos que todavía no están listos (solo se aceptan mientras el proyecto está «recibido» o «en reparación»). Muestra el total anticipado, cada anticipo con su proyecto, cliente, fecha de entrega y quién pagó, y los proyectos que todavía pueden recibir uno. |
+| **Bandeja** | Recibe lo que mandan los mecánicos: **peticiones de material** («Aceptar y enviar» descuenta el material del almacén, lo agrega al proyecto, crea la tarea para que un auxiliar lo lleve al taller del mecánico y le manda «Producto enviado» con el botón **Recibido**; o rechazar con un motivo), **reportes** (en los del líder, recepción decide cuántos créditos bajar al reportado) y **avisos** (trabajo listo, problemas que surgieron). En **Mensajes**, arriba están los **mensajes nuevos** de los mecánicos (se responden o se marcan como leídos) y abajo el **historial**: una conversación por mecánico con todo lo enviado y recibido, del más viejo al más nuevo, con buscador y filtro (todos, recibidos o enviados). Nada se borra al leerlo. |
+| **Cobros** | Total, pagado y saldo de cada proyecto. **Registrar pago** abre una ventana con tres opciones: **producto individual** (venta de un repuesto suelto del almacén), **trabajo de taller** (pago de un proyecto) o **pago anticipado**. Un trabajo **solo se cobra cuando está listo** (o ya entregado); mientras está «recibido» o «en reparación» solo acepta anticipos. Los **pagos anticipados** están en la pestaña **Anticipos** de Cobros: los adelantos registrados y los proyectos activos que todavía pueden recibir uno. En cada pago, anticipo o venta se piden los datos de quien paga (nombres, apellidos, identidad y correo opcional) y la forma de pago: con **tarjeta**, la marca, los últimos 4 dígitos, el titular y el número de autorización (nunca el número completo ni el código de seguridad); con **transferencia**, el banco y la referencia. Solo administración puede anular un pago. |
+| **Traslados** | Tareas de los auxiliares: **Nueva tarea** para traer un vehículo al taller, llevarlo al cliente, recibir producto del proveedor u otra cosa, asignada a un auxiliar o a cualquiera. Pestañas por aceptar, en curso y realizadas, y **Entregas de material**: quién llevó cada pieza y cuándo el mecánico la marcó **Recibido**. |
+| **Talleres** | Los talleres **del edificio** (todos en el mismo lugar, sin dirección) y los **talleres de afuera** (rectificadoras, pintura…, con su dirección), con teléfono, encargado, horario y capacidad. Pestañas para ver unos u otros. Cada mecánico se asocia a un taller; ahí le llevan las piezas. |
 | **Movimientos** | Historial de todo lo que mueve dinero o material: pagos, anticipos, pagos anulados, ventas de repuestos, solicitudes aceptadas y repuestos usados o devueltos en los proyectos, con fecha, proyecto, cantidad, monto y quién lo hizo. Se filtra por tipo y se busca. |
 | **Almacén** | Inventario de repuestos. Con «Enviar» se manda material a un proyecto activo: se descuenta del almacén y se suma al costo. |
 | **Puntuaciones** | Los **líderes que culminaron un proyecto**, con los resultados que dieron a cada acompañante, y los botones para calificar al líder. También el ranking de mecánicos y el **ajuste manual de créditos** (enteros de -100 a 100, con motivo y proyecto opcional). |
@@ -106,14 +119,18 @@ Recepción (y administración) tiene más poder que los mecánicos:
 
 El cobro del trabajo empieza cuando el líder lo marca listo; antes, el cliente solo puede dejar anticipos. Entregar un proyecto con saldo pendiente es posible: el sistema avisa cuánto debe el cliente, y el saldo queda en Cobros.
 
+Solo la **administración** ve el apartado **Administración**: el archivo de reportes y de **comprobantes de cobro** en PDF (ver o descargar, con la nota del sistema), el historial de entregas y las tareas de traslado realizadas.
+
 ## Interfaz web
 
 La carpeta `frontend/` tiene la página que FastAPI sirve en la raíz (`index.html`, `estilos.css` y `app.js`, sin librerías externas). Lo que se ve depende del rol:
 
-- **Administración y recepción:** Resumen, Proyectos (tablero por estado), Bandeja, Cobros, Anticipos, Movimientos, Almacén, Puntuaciones, Vehículos, Clientes y Mecánicos. **Cuentas** es solo para administración, y solo ella ve los botones de editar y eliminar en Clientes y Vehículos.
+- **Administración y recepción:** Resumen, Proyectos (tablero por estado), Bandeja, Cobros, Movimientos, Almacén, Puntuaciones, Vehículos, Clientes y Mecánicos. **Cuentas** es solo para administración, y solo ella ve los botones de editar y eliminar en Clientes y Vehículos.
 - **Mecánico:** el área descrita arriba.
 
-La página pide sus archivos con un número de versión (`app.js?v=12`). Si se cambian, hay que subir ese número en `index.html` para que los navegadores bajen la versión nueva.
+En todas las páginas, el botón **«i»** del encabezado (o la tecla **?**) abre el **centro de ayuda**: para qué sirve la sección, cómo se usa, qué tener en cuenta, el flujo del taller y la ayuda de las demás secciones. Las páginas ya no llevan textos de explicación.
+
+La página pide sus archivos con un número de versión (`app.js?v=17`). Si se cambian, hay que subir ese número en `index.html` para que los navegadores bajen la versión nueva.
 
 Tiene modo claro u oscuro y diseño adaptado al celular. La sesión se guarda solo mientras la pestaña esté abierta.
 
@@ -132,6 +149,11 @@ Tiene modo claro u oscuro y diseño adaptado al celular. La sesión se guarda so
 | Peticiones de material | `/peticiones` | Enviar (`/{id}/enviar`) o rechazar (`/{id}/rechazar`) |
 | Cobros | `/cobros`, `/ordenes/{id}/cobro`, `/ordenes/{id}/pagos` | `tipo`: `pago` o `anticipo`, con los datos de quien paga y de la tarjeta o transferencia. Anular: `DELETE /pagos/{id}` (solo administración) |
 | Anticipos | `/anticipos` | Lista de pagos anticipados con los datos del proyecto |
+| Talleres | `/talleres` | Cada mecánico tiene `taller_id` |
+| Tareas de traslado | `/tareas` (recepción) y `/auxiliar/tareas` (auxiliar) | Aceptar: `POST /auxiliar/tareas/{id}/aceptar` · realizada: `POST /auxiliar/tareas/{id}/realizada` |
+| Entregas de material | `/peticiones/entregas` | El mecánico confirma con `POST /mecanico/peticiones/{id}/recibido` |
+| PDF de reportes | `/reportes/{id}/pdf` y `/mecanico/reportes/{id}/pdf` | Copia guardada al enviar el reporte |
+| Comprobantes de cobro | `/pagos/{id}/pdf`, `/ventas/{id}/pdf` y `/comprobantes` (solo administración) | Guardados al registrar el cobro |
 | Ventas de repuestos | `/ventas` | Venta de un producto individual: descuenta del almacén |
 | Historial de movimientos | `/movimientos` | Filtrar por uno o varios tipos: `?tipo=pago&tipo=venta` |
 | Créditos e historial | `/mecanicos/{id}/creditos`, `/vehiculos/{id}/historial` | Ajuste manual de créditos e historial de un vehículo |

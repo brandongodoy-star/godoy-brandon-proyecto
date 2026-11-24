@@ -40,7 +40,7 @@ ITERACIONES = 200_000
 
 oauth2_esquema = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
-ROLES = ("administrador", "recepcion", "mecanico")
+ROLES = ("administrador", "recepcion", "mecanico", "auxiliar")
 
 # Cuentas que entrega la empresa. Se crean al arrancar si todavía no hay ninguna cuenta
 # de ese rol. Cambie las contraseñas después de entrar por primera vez.
@@ -48,6 +48,7 @@ CUENTAS_INICIALES = (
     {"username": "admin", "password": "Admin2026!", "rol": "administrador", "nombre": "Administración"},
     {"username": "recepcion", "password": "Recepcion2026!", "rol": "recepcion", "nombre": "Recepción"},
     {"username": "mecanico", "password": "Mecanico2026!", "rol": "mecanico"},
+    {"username": "auxiliar", "password": "Auxiliar2026!", "rol": "auxiliar", "nombre": "Auxiliar de Operaciones"},
 )
 
 
@@ -191,3 +192,5 @@ def requiere_rol(*roles: str):
 solo_personal = requiere_rol("administrador", "recepcion")
 solo_administrador = requiere_rol("administrador")
 solo_mecanico = requiere_rol("mecanico")
+# Auxiliar de operaciones y traslado: lleva piezas, recibe producto nuevo y mueve los vehículos
+solo_auxiliar = requiere_rol("auxiliar")

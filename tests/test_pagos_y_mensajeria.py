@@ -147,7 +147,7 @@ def test_aceptar_una_solicitud_manda_el_material(cliente, recepcion, proyecto):
     trabajo = cliente.get(f"/mecanico/trabajos/{orden_id}", headers=proyecto["mecanico"]).json()
     assert {"repuesto": repuesto["nombre"], "cantidad": 2} in trabajo["repuestos"]
     aviso = cliente.get("/mecanico/mensajes", headers=proyecto["mecanico"]).json()[0]
-    assert aviso["asunto"] == f"Material enviado: {repuesto['nombre']} × 2"
+    assert aviso["asunto"] == f"Producto enviado: {repuesto['nombre']} × 2"
     aceptada = movimientos(cliente, recepcion, "solicitud_aceptada")[0]
     assert aceptada["orden_id"] == orden_id and aceptada["cantidad"] == 2
 

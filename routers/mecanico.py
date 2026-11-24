@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from database import obtener_conexion
 from modelos import (
@@ -18,7 +18,14 @@ from modelos import (
     Trabajo,
     TrabajoDetalle,
 )
-from repositorios import RepositorioMensaje, RepositorioReporte, RepositorioRepuesto, RepositorioTrabajos
+from repositorios import (
+    RepositorioMensaje,
+    RepositorioPeticion,
+    RepositorioReporte,
+    RepositorioRepuesto,
+    RepositorioTrabajos,
+)
+from routers.reportes import respuesta_pdf
 from seguridad import solo_mecanico
 
 # Área limitada del mecánico: solo ve sus trabajos, sus reportes y su perfil
@@ -122,6 +129,20 @@ def mis_reportes(usuario: dict = Depends(mecanico_actual)):
 def crear_reporte(datos: ReporteEntrada, usuario: dict = Depends(mecanico_actual)):
     with obtener_conexion() as con:
         return RepositorioReporte(con).crear_de_mecanico(usuario["mecanico_id"], datos.model_dump())
+
+
+@router.get("/reportes/{reporte_id}/pdf", response_class=Response)
+def pdf_de_mi_reporte(reporte_id: int, usuario: dict = Depends(mecanico_actual)):
+    """Copia en PDF de uno de sus reportes."""
+    with obtener_conexion() as con:
+        return respuesta_pdf(RepositorioReporte(con).pdf(reporte_id, usuario["mecanico_id"]), f"reporte-{reporte_id}.pdf")
+
+
+@router.post("/peticiones/{peticion_id}/recibido", response_model=PeticionRespuesta)
+def material_recibido(peticion_id: int, usuario: dict = Depends(mecanico_actual)):
+    """Confirma que le llegó el material que pidió; queda en el historial de entregas."""
+    with obtener_conexion() as con:
+        return RepositorioPeticion(con).recibir(peticion_id, usuario["mecanico_id"])
 
 
 # ---------- Bandeja: mensajes de recepción ----------

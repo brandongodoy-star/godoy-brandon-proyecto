@@ -8,7 +8,7 @@ from creditos import nivel_de
 EstadoOrden = Literal["recibido", "en reparacion", "listo", "entregado"]
 Categoria = Literal["estandar", "premium", "lujo"]
 Calificacion = Literal["excelente", "bien", "con problemas", "rehacer"]
-Rol = Literal["administrador", "recepcion", "mecanico"]
+Rol = Literal["administrador", "recepcion", "mecanico", "auxiliar"]
 TipoReporte = Literal["equipo", "repuestos", "seguridad", "otro"]
 
 
@@ -67,6 +67,8 @@ class MecanicoEntrada(Entrada):
     telefono: str | None = Field(default=None, max_length=20)
     correo: str | None = Field(default=None, max_length=100, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
     fecha_contratacion: date | None = None
+    # Taller (sede) donde trabaja; ahí le llevan las piezas
+    taller_id: int | None = Field(default=None, gt=0)
 
     @field_validator("fecha_contratacion")
     @classmethod
@@ -301,6 +303,8 @@ class ReporteRespuesta(BaseModel):
     sobre_mecanico: str | None = None
     penalizacion: int | None = None
     comentario: str | None = None
+    # Al enviarse, cada reporte guarda una copia en PDF (GET .../reportes/{id}/pdf)
+    tiene_pdf: bool = False
 
 
 class ResolverEntrada(Entrada):
@@ -334,6 +338,9 @@ class PeticionRespuesta(BaseModel):
     respuesta: str | None = None
     fecha: str
     fecha_respuesta: str | None = None
+    # Cuándo confirmó el mecánico que le llegó el material, y cómo va el traslado del auxiliar
+    recibida_en: str | None = None
+    estado_traslado: Literal["pendiente", "aceptada", "realizada"] | None = None
 
 
 class TrabajoDetalle(Trabajo):
@@ -397,6 +404,9 @@ class MensajeMecanico(BaseModel):
     fecha: str
     # «a_mecanico»: lo envió recepción · «a_recepcion»: lo envió el mecánico
     direccion: Literal["a_mecanico", "a_recepcion"]
+    # Aviso de «producto enviado»: la solicitud de material y si el mecánico ya la marcó como recibida
+    peticion_id: int | None = None
+    recibida_en: str | None = None
 
 
 class RepuestoDisponible(BaseModel):
@@ -520,6 +530,27 @@ class MovimientoRespuesta(BaseModel):
     orden_id: int | None = None
     usuario: str | None = None
     fecha: str
+    # Si el movimiento es un cobro, su comprobante en PDF: /pagos/{id}/pdf o /ventas/{id}/pdf
+    pago_id: int | None = None
+    venta_id: int | None = None
+
+
+class ComprobanteRespuesta(BaseModel):
+    """Archivo de la administración: cada cobro con su comprobante en PDF y la nota del sistema."""
+
+    tipo: Literal["pago", "anticipo", "venta"]
+    id: int
+    numero: str
+    fecha: str
+    monto: float
+    metodo: str
+    pagador: str | None = None
+    identidad: str | None = None
+    concepto: str
+    orden_id: int | None = None
+    registrado_por: str | None = None
+    nota: str
+    pdf: str
 
 
 class CobroProyecto(BaseModel):
@@ -577,3 +608,119 @@ class ProyectoDeVehiculo(BaseModel):
     calificacion: Calificacion | None = None
     total: float
     pagado: float
+
+
+# ---------- Talleres ----------
+class TallerEntrada(Entrada):
+    """Los talleres del edificio están todos en el mismo lugar; los de afuera llevan su dirección."""
+
+    nombre: str = Field(min_length=3, max_length=80)
+    ubicacion: Literal["edificio", "externo"] = "edificio"
+    direccion: str | None = Field(default=None, min_length=5, max_length=200)
+    telefono: str | None = Field(default=None, max_length=20)
+    encargado: str | None = Field(default=None, max_length=100)
+    horario: str | None = Field(default=None, max_length=120)
+    capacidad: int | None = Field(default=None, gt=0, le=200)
+    activo: bool = True
+
+    @model_validator(mode="after")
+    def direccion_solo_afuera(self):
+        if self.ubicacion == "externo" and not self.direccion:
+            raise ValueError("Un taller de afuera necesita su dirección")
+        if self.ubicacion == "edificio":
+            self.direccion = None
+        return self
+
+
+class TallerRespuesta(TallerEntrada):
+    id: int
+    mecanicos: int = 0
+
+
+# ---------- Auxiliares de operaciones y traslado ----------
+TipoTarea = Literal["entregar_pieza", "recibir_producto", "traer_vehiculo", "llevar_vehiculo", "otro"]
+EstadoTarea = Literal["pendiente", "aceptada", "realizada"]
+
+
+class TareaEntrada(Entrada):
+    """Tarea que recepción le pone a los auxiliares. «entregar_pieza» la crea el sistema al aprobar
+    una petición de material, por eso no se puede elegir aquí."""
+
+    tipo: Literal["recibir_producto", "traer_vehiculo", "llevar_vehiculo", "otro"]
+    titulo: str | None = Field(default=None, min_length=3, max_length=120)
+    detalle: str | None = Field(default=None, max_length=500)
+    taller_id: int | None = Field(default=None, gt=0)
+    orden_id: int | None = Field(default=None, gt=0)
+    vehiculo_id: int | None = Field(default=None, gt=0)
+    repuesto_id: int | None = Field(default=None, gt=0)
+    cantidad: int | None = Field(default=None, gt=0, le=1000)
+    # Sin auxiliar, la tarea le aparece a todos y la toma el primero que la acepte
+    asignado_a: int | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def datos_segun_el_tipo(self):
+        if self.tipo == "recibir_producto" and (self.repuesto_id is None or self.cantidad is None):
+            raise ValueError("Para recibir producto indique el repuesto y la cantidad")
+        if self.tipo in ("traer_vehiculo", "llevar_vehiculo"):
+            if self.vehiculo_id is None and self.orden_id is None:
+                raise ValueError("Indique el vehículo (o el proyecto) que hay que mover")
+            if self.taller_id is None:
+                raise ValueError("Indique el taller")
+        if self.tipo == "otro" and not self.titulo:
+            raise ValueError("Escriba un título para la tarea")
+        return self
+
+
+class RealizadaEntrada(Entrada):
+    nota: str | None = Field(default=None, max_length=300)
+
+
+class TareaRespuesta(BaseModel):
+    id: int
+    tipo: TipoTarea
+    titulo: str
+    detalle: str | None = None
+    taller_id: int | None = None
+    taller: str | None = None
+    taller_direccion: str | None = None
+    orden_id: int | None = None
+    vehiculo_id: int | None = None
+    placa: str | None = None
+    vehiculo: str | None = None
+    repuesto_id: int | None = None
+    repuesto: str | None = None
+    cantidad: int | None = None
+    peticion_id: int | None = None
+    asignado_a: int | None = None
+    auxiliar: str | None = None
+    estado: EstadoTarea
+    creada_por: str | None = None
+    nota: str | None = None
+    fecha: str
+    aceptada_en: str | None = None
+    realizada_en: str | None = None
+
+
+class AuxiliarRespuesta(BaseModel):
+    id: int
+    username: str
+    nombre: str | None = None
+
+
+class EntregaRespuesta(BaseModel):
+    """Historial de material enviado a los mecánicos: quién lo llevó y cuándo lo recibieron."""
+
+    id: int
+    orden_id: int
+    placa: str
+    mecanico: str
+    taller: str | None = None
+    repuesto: str
+    cantidad: int
+    fecha: str
+    fecha_respuesta: str | None = None
+    tarea_id: int | None = None
+    estado_traslado: EstadoTarea | None = None
+    auxiliar: str | None = None
+    entregada_en: str | None = None
+    recibida_en: str | None = None

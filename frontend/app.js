@@ -33,6 +33,13 @@ function guardar(clave, valor, almacen = sessionStorage) {
 
 // ===================== Íconos =====================
 const ICONOS = {
+  taller: '<path d="M3 21V9.5L12 4l9 5.5V21"/><path d="M7 21v-7h10v7M7 17.5h10"/>',
+  camion: '<path d="M2.5 6.5h11v9.5h-11zM13.5 9.5h4L21 13v3h-7.5"/><circle cx="6.5" cy="17.5" r="1.8"/><circle cx="17" cy="17.5" r="1.8"/>',
+  escudo: '<path d="M12 3l8 3v6c0 4.5-3.4 8.2-8 9-4.6-.8-8-4.5-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/>',
+  documento: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 12h6M9 16h6"/>',
+  descargar: '<path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/>',
+  caja: '<path d="M3.5 8 12 4l8.5 4v8L12 20l-8.5-4z"/><path d="M3.5 8 12 12l8.5-4M12 12v8"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.6h.01"/>',
   calendario: '<rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
   anticipo: '<circle cx="12" cy="13" r="7.5"/><path d="M12 9.5v3.5l2.5 1.5M9.5 2.5h5M12 2.5v3"/>',
   resumen: '<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>',
@@ -104,7 +111,8 @@ const TIPOS_REPORTE = {
   seguridad: "Seguridad o accidente",
   otro: "Otro",
 };
-const ROLES = { administrador: "Administración", recepcion: "Recepción", mecanico: "Mecánico" };
+const ROLES = { administrador: "Administración", recepcion: "Recepción", mecanico: "Mecánico", auxiliar: "Auxiliar de operaciones y traslado" };
+const esAuxiliar = () => estado.yo?.rol === "auxiliar";
 
 const nivelDe = (creditos) => [...NIVELES].reverse().find((n) => creditos >= n.minimo);
 const puedeTrabajar = (creditos, categoria) =>
@@ -220,12 +228,15 @@ async function intentar(accion) {
 async function cargarDatos() {
   const rutas = esMecanico()
     ? { trabajos: "/mecanico/trabajos", perfil: "/mecanico/perfil", reportes: "/mecanico/reportes", almacen: "/mecanico/repuestos", mensajes: "/mecanico/mensajes" }
+    : esAuxiliar()
+    ? { tareas: "/auxiliar/tareas" }
     : {
         clientes: "/clientes", vehiculos: "/vehiculos", mecanicos: "/mecanicos", repuestos: "/repuestos", ordenes: "/ordenes",
         notificaciones: "/notificaciones", peticiones: "/peticiones", reportesTaller: "/reportes", cobros: "/cobros", mensajes: "/mensajes",
         ventas: "/ventas", movimientos: "/movimientos", anticipos: "/anticipos",
+        talleres: "/talleres", tareas: "/tareas", entregas: "/peticiones/entregas", auxiliares: "/tareas/auxiliares",
       };
-  if (estado.yo.rol === "administrador") rutas.usuarios = "/usuarios";
+  if (estado.yo.rol === "administrador") Object.assign(rutas, { usuarios: "/usuarios", comprobantes: "/comprobantes" });
   const respuestas = await Promise.all(Object.values(rutas).map((ruta) => api(ruta)));
   estado.datos = Object.fromEntries(Object.keys(rutas).map((clave, i) => [clave, respuestas[i]]));
 }
@@ -446,6 +457,11 @@ function insigniaExistencia(existencia) {
 
 const opcionesCategoria = Object.entries(CATEGORIAS).map(([valor, c]) => ({ valor, texto: c.nombre }));
 
+const UBICACIONES = {
+  edificio: { nombre: "En el edificio", clase: "insignia-ok", icono: "taller" },
+  externo: { nombre: "Talleres de afuera", clase: "insignia-premium", icono: "camion" },
+};
+
 /** Escala de trabajo de un cliente: la más alta entre sus vehículos ("sin" si no tiene). */
 function escalaCliente(cliente) {
   const escalas = estado.datos.vehiculos.filter((v) => v.cliente_id === cliente.id).map((v) => v.categoria);
@@ -468,8 +484,11 @@ const MODULOS = {
       },
       { titulo: "Vehículos", clase: "numero", valor: (c) => cantidad(estado.datos.vehiculos, "cliente_id", c.id) },
     ],
-    escala: (c) => escalaCliente(c),
-    textoEscala: { singular: "cliente", plural: "clientes" },
+    grupos: {
+      de: (c) => escalaCliente(c), claves: [...ORDEN_ESCALAS, "sin"], nombre: (e) => NOMBRE_ESCALA(e),
+      insignia: (e) => (e === "sin" ? `<span class="insignia insignia-neutra">Sin vehículos</span>` : insigniaCategoria(e)),
+      todas: "Todas las escalas", etiqueta: "Escala de trabajo", singular: "cliente", plural: "clientes",
+    },
     texto: (c) => `${c.nombre} ${c.telefono} ${c.direccion ?? ""}`,
     nombre: (c) => c.nombre,
     campos: () => [
@@ -488,8 +507,10 @@ const MODULOS = {
       { titulo: "Dueño", valor: (v) => esc(porId(estado.datos.clientes, v.cliente_id)?.nombre ?? "—") },
       { titulo: "Órdenes", clase: "numero", valor: (v) => cantidad(estado.datos.ordenes, "vehiculo_id", v.id) },
     ],
-    escala: (v) => v.categoria,
-    textoEscala: { singular: "vehículo", plural: "vehículos" },
+    grupos: {
+      de: (v) => v.categoria, claves: ORDEN_ESCALAS, nombre: (e) => NOMBRE_ESCALA(e), insignia: insigniaCategoria,
+      todas: "Todas las escalas", etiqueta: "Escala de trabajo", singular: "vehículo", plural: "vehículos",
+    },
     texto: (v) => `${v.placa} ${v.marca} ${v.modelo} ${v.anio} ${CATEGORIAS[v.categoria].nombre} ${porId(estado.datos.clientes, v.cliente_id)?.nombre ?? ""}`,
     nombre: (v) => `${v.placa} (${v.marca} ${v.modelo})`,
     campos: () => [
@@ -514,10 +535,11 @@ const MODULOS = {
       { titulo: "Nombre", valor: (m) => `<div class="mecanico-mini"><span class="avatar">${esc(iniciales(m.nombre))}</span><div class="celda-doble"><strong>${esc(m.nombre)}</strong><span>${esc(m.especialidad || "Sin especialidad")}</span></div></div>` },
       { titulo: "Nivel", valor: (m) => `${insigniaNivel(m.creditos)} <span class="texto-tenue">${m.creditos} cr.</span>` },
       { titulo: "Estado", valor: (m) => (m.activo ? `<span class="insignia insignia-ok">Activo</span>` : `<span class="insignia insignia-neutra">Inactivo</span>`) },
+      { titulo: "Taller", valor: (m) => esc(porId(estado.datos.talleres, m.taller_id)?.nombre ?? "Sin taller") },
       { titulo: "Teléfono", valor: (m) => `<span class="mono">${esc(m.telefono || "—")}</span>` },
       { titulo: "En curso", clase: "numero", valor: (m) => cantidad(ordenesActivas(), "mecanico_id", m.id) },
     ],
-    texto: (m) => `${m.nombre} ${m.especialidad ?? ""} ${m.nivel} ${m.correo ?? ""}`,
+    texto: (m) => `${m.nombre} ${m.especialidad ?? ""} ${m.nivel} ${m.correo ?? ""} ${porId(estado.datos.talleres, m.taller_id)?.nombre ?? ""}`,
     nombre: (m) => m.nombre,
     ayudaEliminar: "Si ya tiene órdenes no se puede eliminar; en ese caso edítelo y desmarque «Activo».",
     campos: () => [
@@ -526,6 +548,13 @@ const MODULOS = {
       { nombre: "telefono", etiqueta: "Teléfono", tipo: "tel", maxlength: 20 },
       { nombre: "correo", etiqueta: "Correo", tipo: "email", maxlength: 100 },
       { nombre: "fecha_contratacion", etiqueta: "Fecha de contratación", tipo: "date", max: hoy() },
+      {
+        nombre: "taller_id", etiqueta: "Taller donde trabaja", tipo: "select", textoVacio: "Sin taller",
+        opciones: estado.datos.talleres.filter((t) => t.activo).map((t) => ({
+          valor: t.id, texto: t.ubicacion === "externo" ? `${t.nombre} (afuera)` : t.nombre,
+        })),
+        ayuda: "Ahí le llevan las piezas que pide",
+      },
       { nombre: "activo", etiqueta: "Activo (puede recibir órdenes)", tipo: "checkbox", porDefecto: true, completo: true },
     ],
     notaFormulario: "Los créditos no se editan: cambian solo con la calificación de cada trabajo entregado.",
@@ -547,12 +576,50 @@ const MODULOS = {
       { nombre: "existencia", etiqueta: "Existencia", tipo: "number", requerido: true, min: 0, paso: 1, porDefecto: 0 },
     ],
   },
+  talleres: {
+    ruta: "/talleres", singular: "taller",
+    grupos: {
+      de: (t) => t.ubicacion, claves: ["edificio", "externo"], nombre: (u) => UBICACIONES[u].nombre,
+      insignia: (u) => `<span class="insignia ${UBICACIONES[u].clase}">${icono(UBICACIONES[u].icono)}${UBICACIONES[u].nombre}</span>`,
+      todas: "Todos los talleres", etiqueta: "Ubicación", singular: "taller", plural: "talleres",
+    },
+    columnas: [
+      { titulo: "Taller", valor: (t) => `<div class="celda-doble"><strong>${esc(t.nombre)}</strong><span>${t.ubicacion === "externo" ? esc(t.direccion) : "En el edificio del taller"}</span></div>` },
+      { titulo: "Encargado", valor: (t) => `<div class="celda-doble"><strong>${esc(t.encargado || "Sin encargado")}</strong><span class="mono">${esc(t.telefono || "—")}</span></div>` },
+      { titulo: "Horario", valor: (t) => esc(t.horario || "—") },
+      { titulo: "Capacidad", clase: "numero", valor: (t) => (t.capacidad ? `${t.capacidad} autos` : "—") },
+      { titulo: "Mecánicos", clase: "numero", valor: (t) => t.mecanicos },
+      { titulo: "Estado", valor: (t) => (t.activo ? `<span class="insignia insignia-ok">Abierto</span>` : `<span class="insignia insignia-neutra">Cerrado</span>`) },
+    ],
+    texto: (t) => `${t.nombre} ${t.direccion ?? ""} ${UBICACIONES[t.ubicacion].nombre} ${t.encargado ?? ""} ${t.telefono ?? ""} ${t.horario ?? ""}`,
+    nombre: (t) => t.nombre,
+    ayudaEliminar: "Si tiene mecánicos no se puede eliminar; cámbielos de taller primero.",
+    alAbrir: (raiz) => conectarGrupos(raiz, "ubicacion", { externo: ["externo"], edificio: [] }),
+    campos: () => [
+      { nombre: "nombre", etiqueta: "Nombre", requerido: true, minlength: 3, maxlength: 80, completo: true },
+      {
+        nombre: "ubicacion", etiqueta: "¿Dónde está?", tipo: "radios", numerico: false, requerido: true, completo: true, enLinea: true,
+        porDefecto: "edificio",
+        opciones: [
+          { valor: "edificio", texto: "En el edificio", detalle: "Todos están en el mismo lugar: no lleva dirección" },
+          { valor: "externo", texto: "Taller de afuera", detalle: "Fuera del edificio: rectificadora, pintura, etc." },
+        ],
+      },
+      { nombre: "direccion", etiqueta: "Dirección", requerido: true, minlength: 5, maxlength: 200, completo: true, grupo: "externo",
+        ayuda: "A dónde llevan los auxiliares las piezas y los vehículos" },
+      { nombre: "telefono", etiqueta: "Teléfono", tipo: "tel", maxlength: 20 },
+      { nombre: "encargado", etiqueta: "Encargado", maxlength: 100 },
+      { nombre: "horario", etiqueta: "Horario", maxlength: 120, completo: true, ayuda: "Ejemplo: lunes a viernes, 8:00 a. m. a 5:00 p. m." },
+      { nombre: "capacidad", etiqueta: "Capacidad (vehículos a la vez)", tipo: "number", min: 1, max: 200, paso: 1 },
+      { nombre: "activo", etiqueta: "Abierto (atiende vehículos)", tipo: "checkbox", porDefecto: true },
+    ],
+  },
   usuarios: {
     ruta: "/usuarios", singular: "cuenta", femenino: true, sinEditar: true,
     columnas: [
       { titulo: "Usuario", valor: (u) => `<strong class="mono">${esc(u.username)}</strong>` },
       { titulo: "Nombre", valor: (u) => esc(u.nombre || "—") },
-      { titulo: "Rol", valor: (u) => `<span class="insignia ${u.rol === "mecanico" ? "insignia-baja" : u.rol === "administrador" ? "insignia-lujo" : "insignia-premium"}">${esc(ROLES[u.rol])}</span>` },
+      { titulo: "Rol", valor: (u) => `<span class="insignia ${{ mecanico: "insignia-baja", administrador: "insignia-lujo", auxiliar: "insignia-ok" }[u.rol] ?? "insignia-premium"}">${esc(ROLES[u.rol])}</span>` },
       { titulo: "Mecánico vinculado", valor: (u) => esc(u.mecanico || "—") },
     ],
     texto: (u) => `${u.username} ${u.nombre ?? ""} ${ROLES[u.rol]} ${u.mecanico ?? ""}`,
@@ -584,14 +651,16 @@ const NOMBRE_ESCALA = (clave) => (clave === "sin" ? "Sin vehículos" : CATEGORIA
 function pintarModulo(clave) {
   const modulo = MODULOS[clave];
   const termino = estado.busqueda.toLowerCase();
-  // Clientes y vehículos se organizan por escala de trabajo (estándar → premium → lujo)
-  const escalas = modulo.escala ? [...ORDEN_ESCALAS, ...(clave === "clientes" ? ["sin"] : [])] : [];
+  // Algunas tablas se organizan por grupos: clientes y vehículos por escala de trabajo,
+  // talleres por ubicación (en el edificio o afuera)
+  const g = modulo.grupos;
+  const escalas = g ? g.claves : [];
   estado.filtroEscala ??= {};
-  const filtroEscala = modulo.escala ? estado.filtroEscala[clave] ?? "todas" : "todas";
+  const filtroEscala = g ? estado.filtroEscala[clave] ?? "todas" : "todas";
   let filas = estado.datos[clave].filter((item) => modulo.texto(item).toLowerCase().includes(termino));
-  if (modulo.escala) {
-    if (filtroEscala !== "todas") filas = filas.filter((item) => modulo.escala(item) === filtroEscala);
-    filas = [...filas].sort((a, b) => escalas.indexOf(modulo.escala(a)) - escalas.indexOf(modulo.escala(b)));
+  if (g) {
+    if (filtroEscala !== "todas") filas = filas.filter((item) => g.de(item) === filtroEscala);
+    filas = [...filas].sort((a, b) => escalas.indexOf(g.de(a)) - escalas.indexOf(g.de(b)));
   }
   // Clientes y vehículos: recepción los registra, pero solo la administración los edita o elimina
   const puedeCambiar = !modulo.editaSoloAdmin || estado.yo.rol === "administrador";
@@ -607,20 +676,19 @@ function pintarModulo(clave) {
             </td>
           </tr>`;
   // Con «Todas» se muestra un encabezado por escala; con un filtro, solo esa escala
-  const cuerpo = modulo.escala && filtroEscala === "todas"
+  const cuerpo = g && filtroEscala === "todas"
     ? escalas.map((e) => {
-        const deEscala = filas.filter((item) => modulo.escala(item) === e);
-        if (!deEscala.length) return "";
-        const { singular, plural } = modulo.textoEscala;
-        return `<tr class="fila-grupo"><td colspan="${columnas}">${e === "sin" ? `<span class="insignia insignia-neutra">Sin vehículos</span>` : insigniaCategoria(e)}
-          <span>${deEscala.length} ${deEscala.length === 1 ? singular : plural}</span></td></tr>${deEscala.map(filaHTML).join("")}`;
+        const deGrupo = filas.filter((item) => g.de(item) === e);
+        if (!deGrupo.length) return "";
+        return `<tr class="fila-grupo"><td colspan="${columnas}">${g.insignia(e)}
+          <span>${deGrupo.length} ${deGrupo.length === 1 ? g.singular : g.plural}</span></td></tr>${deGrupo.map(filaHTML).join("")}`;
       }).join("")
     : filas.map(filaHTML).join("");
-  const pestanasEscala = modulo.escala ? `
-        <div class="pestanas-filtro" role="tablist" aria-label="Escala de trabajo">
+  const pestanasEscala = g ? `
+        <div class="pestanas-filtro" role="tablist" aria-label="${esc(g.etiqueta)}">
           ${["todas", ...escalas].map((e) => {
-            const n = e === "todas" ? estado.datos[clave].length : estado.datos[clave].filter((item) => modulo.escala(item) === e).length;
-            return `<button type="button" class="pestana-filtro ${e === filtroEscala ? "activa" : ""}" data-escala="${e}">${e === "todas" ? "Todas las escalas" : NOMBRE_ESCALA(e)} <span class="cuenta-pestana">${n}</span></button>`;
+            const n = e === "todas" ? estado.datos[clave].length : estado.datos[clave].filter((item) => g.de(item) === e).length;
+            return `<button type="button" class="pestana-filtro ${e === filtroEscala ? "activa" : ""}" data-escala="${e}">${e === "todas" ? g.todas : g.nombre(e)} <span class="cuenta-pestana">${n}</span></button>`;
           }).join("")}
         </div>` : "";
 
@@ -640,7 +708,7 @@ function pintarModulo(clave) {
         </tbody>
       </table></div>` : `
       <div class="vacio">${icono(clave)}<strong>${termino || filtroEscala !== "todas" ? "Sin resultados" : `Todavía no hay ${esc(estado.vistas[clave].titulo.toLowerCase())}`}</strong>
-        <span>${termino || filtroEscala !== "todas" ? "Pruebe con otra búsqueda u otra escala." : `Use el botón «${esc(nuevoTexto(modulo))}» para agregar.`}</span></div>`}
+        <span>${termino || filtroEscala !== "todas" ? "Pruebe con otra búsqueda u otro filtro." : `Use el botón «${esc(nuevoTexto(modulo))}» para agregar.`}</span></div>`}
     </section>`;
 
   conectarBusqueda();
@@ -672,6 +740,7 @@ function formularioModulo(clave, registro) {
       aviso(registro ? "Cambios guardados" : creado);
     },
   });
+  modulo.alAbrir?.(dialogo);
 }
 
 async function eliminarRegistro(clave, registro) {
@@ -1250,7 +1319,7 @@ function registrarPago(cobro, tipo = "pago") {
     enviar: async ({ orden_id, ...datos }) => {
       const resultado = await api(`/ordenes/${orden_id ?? cobro.id}/pagos`, { metodo: "POST", datos: { ...datos, tipo } });
       const hecho = esAnticipo ? "Anticipo registrado" : "Pago registrado";
-      aviso(resultado.saldo > 0 ? `${hecho}. Queda ${dinero(resultado.saldo)}` : "Proyecto pagado por completo");
+      aviso(`${resultado.saldo > 0 ? `${hecho}. Queda ${dinero(resultado.saldo)}` : "Proyecto pagado por completo"} · comprobante PDF guardado`);
     },
   });
   conectarMetodoDePago(dialogo);
@@ -1296,7 +1365,7 @@ function formularioVenta() {
     textoBoton: "Registrar venta",
     enviar: async (datos) => {
       const venta = await api("/ventas", { metodo: "POST", datos });
-      aviso(`Venta registrada: ${venta.repuesto} × ${venta.cantidad} = ${dinero(venta.total)}`);
+      aviso(`Venta registrada: ${venta.repuesto} × ${venta.cantidad} = ${dinero(venta.total)} · comprobante PDF guardado`);
     },
   });
   conectarMetodoDePago(dialogo);
@@ -1322,10 +1391,11 @@ async function verPagos(ordenId) {
     ${encabezadoDialogo(`Pagos del proyecto #${cobro.id}`, `${esc(cobro.cliente)} · <span class="placa">${esc(cobro.placa)}</span>`)}
     <div class="dialogo-cuerpo">
       ${cobro.pagos.length ? `<div class="tabla-repuestos tabla-contenedor"><table>
-        <thead><tr><th>Fecha</th><th>Tipo</th><th>Pagó</th><th>Forma</th><th>Registró</th><th class="numero">Monto</th>${puedeAnular ? "<th></th>" : ""}</tr></thead>
+        <thead><tr><th>Fecha</th><th>Tipo</th><th>Pagó</th><th>Forma</th><th>Registró</th><th class="numero">Monto</th><th></th></tr></thead>
         <tbody>${cobro.pagos.map((p) => `<tr><td>${fechaHora(p.fecha)}</td><td>${insigniaTipoPago(p.tipo)}</td><td>${quienPago(p)}</td>
           <td>${detalleMetodo(p)}</td><td>${esc(p.registrado_por || "—")}</td><td class="numero">${dinero(p.monto)}</td>
-          ${puedeAnular ? `<td class="acciones-fila"><button type="button" class="boton boton-icono peligro" data-anular="${p.id}" aria-label="Anular pago">${icono("borrar")}</button></td>` : ""}</tr>`).join("")}
+          <td class="acciones-fila">${botonPdf(`/pagos/${p.id}/pdf`, "Comprobante")}
+            ${puedeAnular ? `<button type="button" class="boton boton-icono peligro" data-anular="${p.id}" aria-label="Anular pago">${icono("borrar")}</button>` : ""}</td></tr>`).join("")}
         </tbody></table></div>` : `<p class="vacio-chico" style="padding-left:0">Todavía no hay pagos.</p>`}
       <div class="totales">
         <div><span>Total</span><span>${dinero(cobro.total)}</span></div>
@@ -1355,12 +1425,13 @@ async function verPagos(ordenId) {
 
 function tablaVentas(ventas) {
   return ventas.length ? `<div class="tabla-contenedor"><table>
-    <thead><tr><th>Fecha</th><th>Repuesto</th><th class="numero">Cantidad</th><th>Pagó</th><th>Forma</th><th>Registró</th><th class="numero">Total</th></tr></thead>
+    <thead><tr><th>Fecha</th><th>Repuesto</th><th class="numero">Cantidad</th><th>Pagó</th><th>Forma</th><th>Registró</th><th class="numero">Total</th><th></th></tr></thead>
     <tbody>${ventas.map((v) => `<tr>
       <td>${fechaHora(v.fecha)}</td>
       <td><div class="celda-doble"><strong>${esc(v.repuesto)}</strong><span>${dinero(v.precio_unitario)} c/u</span></div></td>
       <td class="numero">${v.cantidad}</td><td>${quienPago(v)}</td><td>${detalleMetodo(v)}</td>
-      <td>${esc(v.registrado_por || "—")}</td><td class="numero"><strong>${dinero(v.total)}</strong></td></tr>`).join("")}
+      <td>${esc(v.registrado_por || "—")}</td><td class="numero"><strong>${dinero(v.total)}</strong></td>
+      <td class="acciones-fila">${botonPdf(`/ventas/${v.id}/pdf`, "Comprobante")}</td></tr>`).join("")}
     </tbody></table></div>`
     : `<div class="vacio">${icono("repuestos")}<strong>Sin ventas todavía</strong><span>Use «Registrar pago» → «Producto individual» para vender un repuesto suelto.</span></div>`;
 }
@@ -1369,6 +1440,7 @@ function pintarCobros() {
   const { cobros, ventas } = estado.datos;
   const filtro = estado.filtroCobros ?? "saldo";
   const conSaldo = cobros.filter((c) => c.saldo > 0);
+  const { anticipos } = estado.datos;
   const visibles = filtro === "saldo" ? conSaldo : filtro === "pagado" ? cobros.filter((c) => c.estado_pago === "pagado") : cobros;
   const suma = (lista, campo) => lista.reduce((total, c) => total + c[campo], 0);
 
@@ -1382,12 +1454,14 @@ function pintarCobros() {
     <section class="panel">
       <div class="barra-herramientas">
         <div class="pestanas-filtro" role="tablist">
-          ${[["saldo", "Con saldo"], ["pagado", "Pagados"], ["todos", "Todos"], ["ventas", "Ventas de repuestos"]].map(([clave, texto]) =>
-            `<button type="button" class="pestana-filtro ${clave === filtro ? "activa" : ""}" data-filtro="${clave}">${texto}</button>`).join("")}
+          ${[["saldo", "Con saldo"], ["pagado", "Pagados"], ["todos", "Todos"], ["anticipos", "Anticipos"], ["ventas", "Ventas de repuestos"]].map(([clave, texto]) =>
+            `<button type="button" class="pestana-filtro ${clave === filtro ? "activa" : ""}" data-filtro="${clave}">${texto}${clave === "anticipos" ? ` <span class="cuenta-pestana">${anticipos.length}</span>` : ""}</button>`).join("")}
         </div>
-        <span class="conteo">${filtro === "ventas" ? `${ventas.length} ventas` : `${visibles.length} proyectos`}</span>
+        ${filtro === "anticipos"
+          ? `<button type="button" class="boton boton-primario boton-chico" id="nuevo-anticipo">${icono("anticipo")} Registrar anticipo</button>`
+          : `<span class="conteo">${filtro === "ventas" ? `${ventas.length} ventas` : `${visibles.length} proyectos`}</span>`}
       </div>
-      ${filtro === "ventas" ? tablaVentas(ventas) : visibles.length ? `<div class="tabla-contenedor"><table>
+      ${filtro === "anticipos" ? htmlAnticipos() : filtro === "ventas" ? tablaVentas(ventas) : visibles.length ? `<div class="tabla-contenedor"><table>
         <thead><tr><th>Proyecto</th><th>Cliente</th><th>Estado</th><th class="numero">Total</th><th class="numero">Pagado</th><th class="numero">Saldo</th><th>Pago</th><th></th></tr></thead>
         <tbody>${visibles.map((c) => `<tr>
           <td><div class="celda-doble"><strong>#${c.id} <span class="placa">${esc(c.placa)}</span></strong><span>${esc(c.marca)} ${esc(c.modelo)}</span></div></td>
@@ -1406,6 +1480,7 @@ function pintarCobros() {
   $("#vista").querySelectorAll("[data-filtro]").forEach((boton) =>
     boton.addEventListener("click", () => { estado.filtroCobros = boton.dataset.filtro; pintarCobros(); })
   );
+  $("#nuevo-anticipo")?.addEventListener("click", () => registrarPago(undefined, "anticipo"));
   $("#vista").querySelectorAll("[data-cobrar]").forEach((boton) =>
     boton.addEventListener("click", () => registrarPago(porId(cobros, Number(boton.dataset.cobrar))))
   );
@@ -1418,55 +1493,44 @@ function pintarCobros() {
 }
 
 // ===================== Recepción: apartado de pagos anticipados =====================
-function pintarAnticipos() {
+/** Pestaña «Anticipos» de Cobros: los adelantos registrados y los proyectos que todavía pueden recibir uno. */
+function htmlAnticipos() {
   const { anticipos, cobros } = estado.datos;
   const conAnticipo = new Set(anticipos.map((a) => a.orden_id));
   // Proyectos activos con saldo: son los que todavía pueden recibir un anticipo
   const pueden = cobros.filter((c) => c.saldo > 0 && ESTADOS_EDITABLES.includes(c.estado));
-  const sinAnticipo = pueden.filter((c) => !conAnticipo.has(c.id));
+  const sinAnticipo = pueden.filter((c) => !conAnticipo.has(c.id)).length;
   const total = anticipos.reduce((suma, a) => suma + a.monto, 0);
-
-  $("#vista").innerHTML = `
-    <div class="estadisticas">
-      <div class="panel estadistica"><span class="etiqueta">${icono("anticipo")} Total anticipado</span><span class="valor">${dinero(total)}</span><span class="detalle">${anticipos.length === 1 ? "1 anticipo registrado" : `${anticipos.length} anticipos registrados`}</span></div>
-      <div class="panel estadistica"><span class="etiqueta">${icono("ordenes")} Proyectos con anticipo</span><span class="valor">${conAnticipo.size}</span><span class="detalle">recibieron un adelanto</span></div>
-      <div class="panel estadistica"><span class="etiqueta">${icono("dinero")} Pueden recibir anticipo</span><span class="valor">${pueden.length}</span><span class="detalle">activos y con saldo</span></div>
-      <div class="panel estadistica alerta"><span class="etiqueta">${icono("alerta")} Activos sin anticipo</span><span class="valor">${sinAnticipo.length}</span><span class="detalle">todavía no han abonado</span></div>
+  return `
+    <div class="resumen-anticipos">
+      <div><span>Total anticipado</span><strong>${dinero(total)}</strong></div>
+      <div><span>Proyectos con anticipo</span><strong>${conAnticipo.size}</strong></div>
+      <div><span>Pueden recibir anticipo</span><strong>${pueden.length}</strong></div>
+      <div><span>Activos sin anticipo</span><strong class="${sinAnticipo ? "negativo" : ""}">${sinAnticipo}</strong></div>
     </div>
-    <section class="panel">
-      <div class="panel-encabezado"><h2>Anticipos registrados</h2><span class="conteo">${anticipos.length}</span></div>
-      ${anticipos.length ? `<div class="tabla-contenedor"><table>
-        <thead><tr><th>Fecha</th><th>Proyecto</th><th>Cliente</th><th>Entrega</th><th>Pagó</th><th>Forma</th><th>Registró</th><th class="numero">Monto</th><th></th></tr></thead>
-        <tbody>${anticipos.map((a) => `<tr>
-          <td class="sin-saltos">${fechaHora(a.fecha)}</td>
-          <td><div class="celda-doble"><strong>#${a.orden_id} <span class="placa">${esc(a.placa)}</span></strong><span>${esc(a.marca)} ${esc(a.modelo)} · ${esc(nombreEstado(a.estado))}</span></div></td>
-          <td>${esc(a.cliente)}</td>
-          <td>${insigniaLimite(a.fecha_limite, a.estado)}</td>
-          <td>${quienPago(a)}</td><td>${detalleMetodo(a)}</td><td>${esc(a.registrado_por || "—")}</td>
-          <td class="numero"><strong>${dinero(a.monto)}</strong></td>
-          <td class="acciones-fila"><button type="button" class="boton boton-icono" data-pagos="${a.orden_id}" aria-label="Ver pagos del proyecto" title="Ver pagos del proyecto">${icono("reloj")}</button></td>
-        </tr>`).join("")}
-        </tbody></table></div>`
-        : `<div class="vacio">${icono("anticipo")}<strong>Todavía no hay anticipos</strong><span>Use «Registrar anticipo» para abonar a un proyecto que aún no está listo.</span></div>`}
-    </section>
-    <section class="panel">
-      <div class="panel-encabezado"><h2>Proyectos que pueden recibir anticipo</h2><span class="conteo">${pueden.length}</span></div>
-      ${pueden.length ? `<ul class="lista">${pueden.map((c) => `
-        <li><div class="fila-lista">
-          <span class="principal"><strong>#${c.id} · ${esc(c.placa)} · ${esc(c.marca)} ${esc(c.modelo)}</strong>
-            <span>${esc(c.cliente)} · ${esc(nombreEstado(c.estado))} · saldo ${dinero(c.saldo)}${conAnticipo.has(c.id) ? " · ya tiene anticipo" : ""}</span></span>
-          ${insigniaLimite(porId(estado.datos.ordenes, c.id)?.fecha_limite, c.estado)}
-          <button type="button" class="boton boton-secundario boton-chico" data-anticipo="${c.id}">${icono("anticipo")} Anticipo</button>
-        </div></li>`).join("")}</ul>`
-        : `<p class="vacio-chico">No hay proyectos activos con saldo.</p>`}
-    </section>`;
-
-  $("#vista").querySelectorAll("[data-anticipo]").forEach((boton) =>
-    boton.addEventListener("click", () => registrarPago(porId(cobros, Number(boton.dataset.anticipo)), "anticipo"))
-  );
-  $("#vista").querySelectorAll("[data-pagos]").forEach((boton) =>
-    boton.addEventListener("click", () => verPagos(Number(boton.dataset.pagos)))
-  );
+    ${anticipos.length ? `<div class="tabla-contenedor"><table>
+      <thead><tr><th>Fecha</th><th>Proyecto</th><th>Cliente</th><th>Entrega</th><th>Pagó</th><th>Forma</th><th>Registró</th><th class="numero">Monto</th><th></th></tr></thead>
+      <tbody>${anticipos.map((a) => `<tr>
+        <td class="sin-saltos">${fechaHora(a.fecha)}</td>
+        <td><div class="celda-doble"><strong>#${a.orden_id} <span class="placa">${esc(a.placa)}</span></strong><span>${esc(a.marca)} ${esc(a.modelo)} · ${esc(nombreEstado(a.estado))}</span></div></td>
+        <td>${esc(a.cliente)}</td>
+        <td>${insigniaLimite(a.fecha_limite, a.estado)}</td>
+        <td>${quienPago(a)}</td><td>${detalleMetodo(a)}</td><td>${esc(a.registrado_por || "—")}</td>
+        <td class="numero"><strong>${dinero(a.monto)}</strong></td>
+        <td class="acciones-fila">${botonPdf(`/pagos/${a.id}/pdf`, "Comprobante")}
+          <button type="button" class="boton boton-icono" data-pagos="${a.orden_id}" aria-label="Ver pagos del proyecto" title="Ver pagos del proyecto">${icono("reloj")}</button></td>
+      </tr>`).join("")}
+      </tbody></table></div>`
+      : `<div class="vacio">${icono("anticipo")}<strong>Todavía no hay anticipos</strong><span>Use «Registrar anticipo» para abonar a un proyecto que aún no está listo.</span></div>`}
+    <h3 class="subtitulo-panel">Proyectos que pueden recibir anticipo <span class="conteo">${pueden.length}</span></h3>
+    ${pueden.length ? `<ul class="lista">${pueden.map((c) => `
+      <li><div class="fila-lista">
+        <span class="principal"><strong>#${c.id} · ${esc(c.placa)} · ${esc(c.marca)} ${esc(c.modelo)}</strong>
+          <span>${esc(c.cliente)} · ${esc(nombreEstado(c.estado))} · saldo ${dinero(c.saldo)}${conAnticipo.has(c.id) ? " · ya tiene anticipo" : ""}</span></span>
+        ${insigniaLimite(porId(estado.datos.ordenes, c.id)?.fecha_limite, c.estado)}
+        <button type="button" class="boton boton-secundario boton-chico" data-anticipo="${c.id}">${icono("anticipo")} Anticipo</button>
+      </div></li>`).join("")}</ul>`
+      : `<p class="vacio-chico">No hay proyectos activos con saldo.</p>`}`;
 }
 
 // ===================== Recepción: almacén e historial de vehículos =====================
@@ -1576,11 +1640,12 @@ function nuevoMensaje(valores = {}) {
 
 // ===================== Historial de mensajes (compartido) =====================
 /** Un mensaje como burbuja de conversación. `propio`: lo envió quien está mirando (va a la derecha). */
-function burbujaMensaje(m, { propio, quien, nota = "", nuevo = false }) {
+function burbujaMensaje(m, { propio, quien, nota = "", nuevo = false, extra = "" }) {
   return `<li class="burbuja ${propio ? "propia" : ""} ${nuevo ? "nueva" : ""}">
       <strong>${esc(m.asunto)}</strong>
       <p>${esc(m.texto)}</p>
       <span class="burbuja-pie">${esc(quien)} · ${fechaHora(m.fecha)}${m.orden_id ? ` · proyecto #${m.orden_id}` : ""}${nota ? ` · ${nota}` : ""}</span>
+      ${extra ? `<div class="burbuja-acciones">${extra}</div>` : ""}
     </li>`;
 }
 
@@ -1644,7 +1709,8 @@ function pintarBandeja() {
           <p>${esc(r.descripcion)}</p>
           <span class="texto-tenue de-quien">${esc(r.mecanico)} · ${fechaHora(r.fecha)}${r.orden_id ? ` · proyecto #${r.orden_id}` : ""}</span>
           ${r.estado === "resuelto" && r.sobre_mecanico ? `<span class="resultado-reporte">${r.penalizacion ? `Se le bajaron <strong class="negativo">${r.penalizacion} créditos</strong>` : "Sin bajar créditos"}${r.comentario ? ` · «${esc(r.comentario)}»` : ""}</span>` : ""}
-          ${r.estado === "abierto" ? `<div class="acciones-tarjeta"><button type="button" class="boton boton-secundario boton-chico" data-resolver="${r.id}">${icono("check")} ${r.sobre_mecanico ? "Resolver y decidir créditos" : "Marcar resuelto"}</button></div>` : ""}
+          <div class="acciones-tarjeta">${r.tiene_pdf ? botonPdf(`/reportes/${r.id}/pdf`) : ""}
+            ${r.estado === "abierto" ? `<button type="button" class="boton boton-secundario boton-chico" data-resolver="${r.id}">${icono("check")} ${r.sobre_mecanico ? "Resolver y decidir créditos" : "Marcar resuelto"}</button>` : ""}</div>
         </article>`).join("")}</div>` : `<div class="panel vacio">${icono("reporte")}<strong>Sin reportes abiertos</strong><span>Los reportes de los mecánicos y de los líderes llegan aquí.</span></div>`}`;
   } else if (pestana === "mensajes") {
     // Arriba los mensajes nuevos de los mecánicos; abajo el historial completo, una conversación por mecánico
@@ -1702,7 +1768,7 @@ function pintarBandeja() {
               return burbujaMensaje(m, {
                 propio,
                 quien: propio ? `${m.remitente} → ${m.mecanico}` : m.mecanico,
-                nota: propio ? (m.leido ? "Leído" : "Sin leer") : m.leido ? "" : "Nuevo",
+                nota: propio ? (m.peticion_id ? (m.recibida_en ? "Recibido por el mecánico" : "Esperando que lo reciba") : m.leido ? "Leído" : "Sin leer") : m.leido ? "" : "Nuevo",
                 nuevo: !propio && !m.leido,
               });
             }).join("")}</ul>
@@ -1893,7 +1959,7 @@ function pintarMovimientos() {
         <span class="conteo">${lista.length} de ${todos.length}</span>
       </div>
       ${lista.length ? `<div class="tabla-contenedor"><table>
-        <thead><tr><th>Fecha</th><th>Tipo</th><th class="col-descripcion">Descripción</th><th>Proyecto</th><th class="numero">Cantidad</th><th class="numero">Monto</th><th>Usuario</th></tr></thead>
+        <thead><tr><th>Fecha</th><th>Tipo</th><th class="col-descripcion">Descripción</th><th>Proyecto</th><th class="numero">Cantidad</th><th class="numero">Monto</th><th>Usuario</th><th>Comprobante</th></tr></thead>
         <tbody>${lista.map((m) => `<tr>
           <td class="sin-saltos">${fechaHora(m.fecha)}</td>
           <td><span class="insignia ${TIPOS_MOVIMIENTO[m.tipo][1]}">${TIPOS_MOVIMIENTO[m.tipo][0]}</span></td>
@@ -1901,7 +1967,8 @@ function pintarMovimientos() {
           <td>${m.orden_id ? `<button type="button" class="enlace" data-ver-proyecto="${m.orden_id}">#${m.orden_id}</button>` : `<span class="texto-tenue">—</span>`}</td>
           <td class="numero">${m.cantidad ?? "—"}</td>
           <td class="numero ${m.monto < 0 ? "negativo" : ""}">${m.monto == null ? "—" : dinero(m.monto)}</td>
-          <td>${esc(m.usuario || "—")}</td></tr>`).join("")}
+          <td>${esc(m.usuario || "—")}</td>
+          <td>${m.pago_id ? botonPdf(`/pagos/${m.pago_id}/pdf`) : m.venta_id ? botonPdf(`/ventas/${m.venta_id}/pdf`) : `<span class="texto-tenue">—</span>`}</td></tr>`).join("")}
         </tbody></table></div>`
         : `<div class="vacio">${icono("reloj")}<strong>${termino ? "Sin resultados" : "Sin movimientos"}</strong><span>${termino ? "Pruebe con otra búsqueda." : "Aquí aparecen los pagos, las ventas, las solicitudes aceptadas y los repuestos usados."}</span></div>`}
     </section>`;
@@ -1965,7 +2032,6 @@ function pintarPuntuaciones() {
   $("#vista").innerHTML = `
     <section class="seccion-culminados">
       <div class="encabezado-seccion"><h2>Líderes que culminaron un proyecto</h2><span class="conteo">${culminados.length}</span></div>
-      <p class="texto-tenue">Revise lo que cada líder dio a sus acompañantes y califique al líder. Al calificarlo, el proyecto queda entregado.</p>
       ${culminados.length ? `<div class="rejilla-culminados">${culminados.map(tarjetaCulminado).join("")}</div>`
         : `<div class="panel vacio">${icono("estrella")}<strong>Nada por calificar</strong><span>Cuando un líder marque su proyecto como listo aparecerá aquí.</span></div>`}
     </section>
@@ -2172,7 +2238,9 @@ function seccionMaterial(t) {
     ? `<ul class="lista-peticiones">${t.peticiones.map((p) => `
         <li><span class="principal"><strong>${esc(p.repuesto)} × ${p.cantidad}</strong>
           <span>${esc(p.mecanico)} · ${fechaHora(p.fecha)}${p.respuesta ? ` · «${esc(p.respuesta)}»` : ""}</span></span>
-          <span class="insignia ${ESTADO_PETICION[p.estado][1]}">${ESTADO_PETICION[p.estado][0]}</span></li>`).join("")}</ul>`
+          ${p.estado === "enviada" && p.recibida_en ? `<span class="insignia insignia-ok">${icono("check")}Recibido</span>`
+            : p.estado === "enviada" && p.mecanico_id === estado.yo.mecanico_id ? botonRecibido(p.id, t.id)
+            : `<span class="insignia ${ESTADO_PETICION[p.estado][1]}">${ESTADO_PETICION[p.estado][0]}</span>`}</li>`).join("")}</ul>`
     : `<p class="vacio-chico" style="padding-left:0">No se ha pedido material para este trabajo.</p>`;
   const formulario = activo ? `
     <form id="formulario-material" class="pedir-material" novalidate>
@@ -2410,7 +2478,6 @@ function pintarBandejaMecanico() {
           <button type="button" class="boton boton-primario boton-chico" id="escribir-recepcion" ${puedeEscribir ? "" : "disabled"}
             title="${puedeEscribir ? "Pida material, herramientas o avise algo" : "Solo con un proyecto activo"}">${icono("enviar")} Escribir a recepción</button>
         </div></div>
-      ${puedeEscribir ? "" : `<p class="nota-bandeja">${icono("candado")} Podrá escribir a recepción cuando tenga un proyecto activo (recibido o en reparación).</p>`}
       ${nuevos.length ? `<ul class="lista">${nuevos.map((m) => `
         <li class="no-leida"><div class="fila-lista fila-mensaje">
           <span class="avatar">${icono("bandeja")}</span>
@@ -2419,7 +2486,8 @@ function pintarBandejaMecanico() {
             <span class="texto-mensaje">${esc(m.texto)}</span></span>
           <span class="acciones-mensaje">
             ${botonProyecto(m)}
-            <button type="button" class="boton boton-icono" data-leido="${m.id}" aria-label="Marcar como leído (pasa al historial)" title="Marcar como leído (pasa al historial)">${icono("check")}</button>
+            ${m.peticion_id && !m.recibida_en ? botonRecibido(m.peticion_id)
+              : `<button type="button" class="boton boton-icono" data-leido="${m.id}" aria-label="Marcar como leído (pasa al historial)" title="Marcar como leído (pasa al historial)">${icono("check")}</button>`}
           </span></div></li>`).join("")}</ul>`
         : `<p class="vacio-chico">No tiene mensajes nuevos. Los leídos quedan guardados en el historial.</p>`}
     </section>
@@ -2431,8 +2499,10 @@ function pintarBandejaMecanico() {
         return burbujaMensaje(m, {
           propio,
           quien: propio ? "Usted → Recepción" : m.remitente,
-          nota: propio ? (m.leido ? "Leído por recepción" : "Enviado") : m.leido ? "" : "Nuevo",
+          nota: propio ? (m.leido ? "Leído por recepción" : "Enviado")
+            : m.peticion_id ? (m.recibida_en ? `Recibido ${fechaHora(m.recibida_en)}` : "Por recibir") : m.leido ? "" : "Nuevo",
           nuevo: !propio && !m.leido,
+          extra: m.peticion_id && !m.recibida_en ? botonRecibido(m.peticion_id) : "",
         });
       }).join("")}</ul>`
         : `<div class="vacio">${icono("bandeja")}<strong>${filtro === "todos" ? "Sin mensajes" : "Nada en este filtro"}</strong><span>Aquí queda guardado todo lo que habla con recepción, y los reportes sobre su trabajo.</span></div>`}
@@ -2517,7 +2587,8 @@ function pintarReportes() {
             </div>
             <strong>${esc(r.titulo)}</strong>
             <p>${esc(r.descripcion)}</p>
-            <span class="texto-tenue">${fechaHora(r.fecha)}${r.orden_id ? ` · Proyecto #${r.orden_id}` : ""}</span>
+            <div class="pie-reporte"><span class="texto-tenue">${fechaHora(r.fecha)}${r.orden_id ? ` · Proyecto #${r.orden_id}` : ""}</span>
+              ${r.tiene_pdf ? botonPdf(`/mecanico/reportes/${r.id}/pdf`) : ""}</div>
           </li>`).join("")}</ul>`
           : `<div class="vacio">${icono("reporte")}<strong>Sin reportes</strong><span>Si algo falla en el taller, avise desde aquí.</span></div>`}
       </section>
@@ -2533,7 +2604,7 @@ function pintarReportes() {
     boton.disabled = true;
     try {
       await api("/mecanico/reportes", { metodo: "POST", datos: leerFormulario(formulario, campos) });
-      aviso("Reporte enviado a recepción");
+      aviso("Reporte enviado a recepción. Se guardó una copia en PDF.");
       await refrescar();
     } catch (e) {
       if (!(e instanceof ErrorSilencioso)) error.textContent = e.message;
@@ -2617,7 +2688,6 @@ function pintarPerfil() {
             <div><dt>En el taller desde</dt><dd>${p.fecha_contratacion ? `${fecha(p.fecha_contratacion)} · ${antiguedad(p.fecha_contratacion)}` : "—"}</dd></div>
             <div><dt>Especialidad</dt><dd>${esc(p.especialidad || "—")}</dd></div>
           </dl>
-          <p class="texto-tenue nota-datos">Si algún dato está mal, pida a recepción que lo corrija.</p>
         </section>
 
         <section class="panel">
@@ -2663,25 +2733,673 @@ function pintarPerfil() {
   });
 }
 
+
+// ===================== Centro de ayuda =====================
+// Lo que antes se explicaba en cada página ahora vive aquí: se abre con la «i» del encabezado o con «?».
+const AYUDA_PERSONAL = {
+  resumen: {
+    para: "Muestra de un vistazo cómo está el taller hoy: cuántos vehículos hay, cuáles están listos, los clientes y los repuestos que se están acabando.",
+    pasos: ["Mire las tarjetas de arriba para ver los totales del día.", "En «Órdenes por estado» vea cuántos proyectos hay en cada etapa.", "En «Trabajo en curso» toque un proyecto para abrir su detalle."],
+    notas: ["Los números se actualizan cada vez que entra a la sección."],
+  },
+  ordenes: {
+    para: "Tablero de los proyectos de trabajo, ordenados por estado: Recibido, En reparación, Listo y Entregado.",
+    pasos: [
+      "Use «Nuevo proyecto» y elija el vehículo: la escala del trabajo (Estándar, Premium o Lujo) se marca sola.",
+      "Elija al líder y a los acompañantes. Los que ya están en otro proyecto aparecen como «No disponible».",
+      "Escriba el problema, las indicaciones del cliente y la fecha límite de entrega, o marque «No especificó».",
+      "Toque una tarjeta para ver el detalle, editarlo, avanzar su estado o mandar un mensaje al equipo.",
+    ],
+    notas: [
+      "El líder necesita nivel para la escala: Técnico para Premium y Maestro para Lujo.",
+      "Las tarjetas avisan si la entrega está cerca o vencida.",
+      "Un proyecto solo se edita mientras está «Recibido» o «En reparación».",
+    ],
+  },
+  bandeja: {
+    para: "Todo lo que envían los mecánicos: peticiones de material, reportes, avisos y mensajes.",
+    pasos: [
+      "Peticiones: «Aceptar y enviar» descuenta el material del almacén, lo agrega al proyecto y avisa al mecánico; o rechácela con un motivo.",
+      "Reportes: resuélvalos. En los de un líder, decida cuántos créditos bajarle al reportado (de 0 a 100).",
+      "Avisos: trabajos listos y problemas que surgieron; márquelos como leídos.",
+      "Mensajes: arriba los nuevos y abajo el historial de cada mecánico. Responda o escriba uno nuevo.",
+    ],
+    notas: ["Los mensajes leídos no se borran: pasan al historial.", "El número en cada pestaña indica lo que falta atender."],
+  },
+  cobros: {
+    para: "Todo lo que se cobra: pagos de los trabajos, pagos anticipados (pestaña «Anticipos») y venta de repuestos sueltos, con el saldo pendiente de cada proyecto.",
+    pasos: [
+      "Toque «Registrar pago» y elija: producto individual, trabajo de taller o pago anticipado.",
+      "Elija el proyecto o el repuesto, el monto y los datos de quien paga: nombres, apellidos, identidad y correo.",
+      "Indique la forma de pago. Con tarjeta: marca, últimos 4 dígitos y autorización. Con transferencia: banco y referencia.",
+      "Con el reloj de cada fila vea todos los pagos de ese proyecto.",
+      "En la pestaña «Anticipos» vea los adelantos registrados y los proyectos activos que todavía pueden recibir uno.",
+    ],
+    notas: [
+      "Un trabajo solo se cobra cuando está listo o entregado; antes solo acepta anticipos.",
+      "Nunca escriba el número completo de la tarjeta ni el código de seguridad.",
+      "Solo la administración puede anular un pago.",
+    ],
+  },
+  anticipos: {
+    para: "Adelantos que deja el cliente antes de que su trabajo esté listo.",
+    pasos: ["Use «Registrar anticipo» o el botón «Anticipo» de un proyecto.", "Elija el proyecto, el monto y los datos de quien paga.", "El anticipo se descuenta del saldo del proyecto."],
+    notas: ["Solo se aceptan anticipos en proyectos «Recibido» o «En reparación».", "Abajo verá qué proyectos todavía pueden recibir un anticipo."],
+  },
+  movimientos: {
+    para: "Historial de todo lo que mueve dinero o material: pagos, anticipos, ventas, solicitudes aceptadas y repuestos usados.",
+    pasos: ["Filtre por Pagos, Solicitudes aceptadas o Repuestos vendidos o usados.", "Busque por descripción, repuesto, usuario o número de proyecto.", "Toque el número de un proyecto para abrirlo."],
+    notas: ["Los pagos anulados aparecen con monto negativo.", "Cada movimiento guarda quién lo hizo y cuándo."],
+  },
+  repuestos: {
+    para: "Inventario del almacén: precio, existencia y valor de cada repuesto.",
+    pasos: [
+      "Use «Nuevo repuesto» para agregar uno.",
+      "Con «Enviar a un proyecto» mande material a un proyecto activo: se descuenta del almacén y se suma al costo.",
+      "Edite el precio o la existencia con el lápiz.",
+    ],
+    notas: ["Con 5 o menos se marca como «Poca» existencia, y en rojo cuando se agota.", "No se puede eliminar un repuesto que ya se usó en un proyecto."],
+  },
+  puntuaciones: {
+    para: "Calificación de los líderes y créditos (fama) de los mecánicos.",
+    pasos: [
+      "En «Líderes que culminaron un proyecto» revise lo que cada líder dio a sus acompañantes.",
+      "Califique al líder: Excelente, Bueno, Con fallas o Requiere retrabajo. Al calificarlo, el proyecto queda entregado.",
+      "Use el ajuste manual para sumar o restar créditos con un motivo.",
+    ],
+    notas: [
+      "En un auto Estándar la calificación da +20, +10, -10 o -25 créditos; Premium vale 1.5 veces y Lujo, el doble.",
+      "Cada acompañante recibe la mitad según recepción y la otra mitad según su líder.",
+      "Niveles: Aprendiz desde 0, Técnico desde 100 y Maestro desde 250 créditos.",
+    ],
+  },
+  vehiculos: {
+    para: "Registro de vehículos, organizados por escala de trabajo.",
+    pasos: ["Use «Nuevo vehículo»: placa, marca, modelo, año, dueño y escala.", "Filtre por escala con las pestañas.", "Con el reloj abra el historial del vehículo: sus proyectos, lo gastado y lo que debe."],
+    notas: ["Recepción registra vehículos; solo la administración los edita o elimina.", "La escala decide qué nivel de líder necesita el trabajo."],
+  },
+  clientes: {
+    para: "Personas que traen sus vehículos, organizadas por la escala de trabajo de sus autos.",
+    pasos: ["Use «Nuevo cliente» con nombre, teléfono y dirección.", "Filtre por escala o busque por nombre o teléfono."],
+    notas: ["Solo la administración edita o elimina clientes.", "Un cliente con vehículos no se puede eliminar."],
+  },
+  mecanicos: {
+    para: "Fichas de los mecánicos con su nivel, sus créditos y si están activos.",
+    pasos: ["Use «Nuevo mecánico» para registrar su ficha.", "Si alguien deja de trabajar, edítelo y desmarque «Activo».", "Para que entre al sistema, la administración le crea una cuenta en «Cuentas»."],
+    notas: ["Los créditos no se editan aquí: cambian con las calificaciones o con el ajuste de Puntuaciones.", "«En curso» muestra cuántos proyectos activos tiene."],
+  },
+  usuarios: {
+    para: "Cuentas de acceso al sistema. No hay registro público: la empresa las entrega.",
+    pasos: ["Use «Nueva cuenta» con usuario, contraseña inicial y rol.", "Para un mecánico, vincule su ficha para que vea sus trabajos.", "Elimine las cuentas de quien ya no trabaja."],
+    notas: ["Roles: Administración (todo), Recepción (el día a día) y Mecánico (solo su área).", "Pida que cambien la contraseña inicial al entrar."],
+  },
+};
+
+const AYUDA_MECANICO = {
+  trabajos: {
+    para: "Los vehículos que le asignó recepción, como líder o como parte del equipo.",
+    pasos: [
+      "Toque un trabajo para ver el auto, el problema, las indicaciones del cliente y la fecha límite.",
+      "Si es el líder: empiece la reparación, asigne tareas, califique a su equipo y márquelo como listo.",
+      "Cualquier miembro puede pedir material del almacén y avisar a recepción de los problemas que surjan.",
+    ],
+    notas: ["Para marcarlo como listo, el líder debe haber calificado a todo el equipo.", "Al terminar el trabajo, el líder pierde sus permisos sobre él."],
+  },
+  bandeja: {
+    para: "Su conversación con recepción: mensajes nuevos arriba e historial completo abajo.",
+    pasos: ["Lea los mensajes nuevos y márquelos como leídos: pasan al historial.", "Con «Escribir a recepción» pida material, herramientas o avise algo.", "Filtre el historial por recibidos o enviados."],
+    notas: ["Solo puede escribir a recepción mientras tenga un proyecto activo (recibido o en reparación).", "Aquí también llegan los reportes que su líder hizo sobre usted, con lo que decidió recepción."],
+  },
+  reportes: {
+    para: "Para avisar a recepción de fallas de equipo, falta de repuestos, problemas de seguridad u otros.",
+    pasos: ["Llene «Nuevo reporte»: tipo, título, descripción y, si aplica, el proyecto.", "En «Mis reportes» vea si siguen abiertos o ya se resolvieron."],
+    notas: ["Los reportes llegan a la bandeja de recepción."],
+  },
+  perfil: {
+    para: "Sus datos, su nivel, sus créditos y el historial de cómo los ganó.",
+    pasos: ["Revise su nivel y cuánto le falta para el siguiente.", "Vea en el historial cada trabajo y los créditos que le dio.", "Cambie su contraseña cuando lo necesite."],
+    notas: ["Niveles: Aprendiz (autos Estándar), Técnico desde 100 créditos (Premium) y Maestro desde 250 (Lujo).", "Si algún dato está mal, pida a recepción que lo corrija."],
+  },
+};
+
+const FLUJO_PERSONAL = [
+  "Registre al cliente y su vehículo.",
+  "Cree el proyecto: líder, equipo, problema y fecha límite.",
+  "El equipo trabaja; atienda la bandeja (material, reportes y mensajes).",
+  "Cuando el líder lo marca listo, cobre el trabajo.",
+  "Califique al líder en Puntuaciones: el proyecto queda entregado.",
+];
+const FLUJO_MECANICO = [
+  "Recepción le asigna un trabajo.",
+  "El líder lo empieza y reparte las tareas.",
+  "Pida material o escriba a recepción si hace falta.",
+  "El líder lo marca listo y recepción lo califica: el equipo gana créditos.",
+];
+
+const ayuda = $("#ayuda");
+ayuda.addEventListener("click", (evento) => { if (evento.target === ayuda) ayuda.close(); });
+
+/** Contenido de ayuda de una sección: para qué sirve, cómo se usa y qué tener en cuenta. */
+function contenidoAyuda(a) {
+  if (!a) return `<p class="texto-tenue">Esta sección todavía no tiene ayuda.</p>`;
+  return `
+    <p class="ayuda-para">${esc(a.para)}</p>
+    <h4>Cómo se usa</h4>
+    <ol class="ayuda-pasos">${a.pasos.map((p) => `<li>${esc(p)}</li>`).join("")}</ol>
+    ${a.notas?.length ? `<h4>Tenga en cuenta</h4><ul class="ayuda-notas">${a.notas.map((n) => `<li>${icono("check")}<span>${esc(n)}</span></li>`).join("")}</ul>` : ""}`;
+}
+
+/** Abre el panel de ayuda con la sección actual primero, el flujo del taller y las demás secciones. */
+function abrirAyuda(clave = estado.vista) {
+  const ayudas = esMecanico() ? AYUDA_MECANICO : esAuxiliar() ? AYUDA_AUXILIAR : AYUDA_PERSONAL;
+  const flujo = esMecanico() ? FLUJO_MECANICO : esAuxiliar() ? FLUJO_AUXILIAR : FLUJO_PERSONAL;
+  const vista = estado.vistas[clave];
+  const otras = Object.entries(estado.vistas).filter(([k]) => k !== clave);
+  ayuda.innerHTML = `
+    <div class="ayuda-cabeza">
+      <span class="icono-vista">${icono("info")}</span>
+      <div><p class="area-vista">Centro de ayuda</p><h2>${esc(vista.titulo)}</h2></div>
+      <button type="button" class="boton boton-icono" data-cerrar aria-label="Cerrar ayuda">${icono("cerrar")}</button>
+    </div>
+    <div class="ayuda-cuerpo">
+      <section class="ayuda-actual">
+        <h3>${icono(vista.icono)} Para qué sirve</h3>
+        ${contenidoAyuda(ayudas[clave])}
+      </section>
+      <section>
+        <h3 class="ayuda-subtitulo">Cómo funciona el taller</h3>
+        <ol class="ayuda-flujo">${flujo.map((paso, i) => `<li><span class="numero-flujo">${i + 1}</span><span>${esc(paso)}</span></li>`).join("")}</ol>
+      </section>
+      <section>
+        <h3 class="ayuda-subtitulo">Otras secciones</h3>
+        <div class="ayuda-secciones">${otras.map(([k, v]) => `
+          <details>
+            <summary>${icono(v.icono)}<span>${esc(v.titulo)}</span>${icono("flecha")}</summary>
+            <div class="ayuda-detalle">${contenidoAyuda(ayudas[k])}
+              <a class="boton boton-secundario boton-chico" href="#/${k}" data-ir>Ir a ${esc(v.titulo)}</a></div>
+          </details>`).join("")}</div>
+      </section>
+      <p class="ayuda-atajo">Atajo: presione <kbd>?</kbd> en cualquier página para abrir esta ayuda.</p>
+    </div>`;
+  ayuda.querySelectorAll("[data-cerrar], [data-ir]").forEach((b) => b.addEventListener("click", () => ayuda.close()));
+  if (!ayuda.open) ayuda.showModal();
+}
+
+
+Object.assign(AYUDA_PERSONAL, {
+  talleres: {
+    para: "Los talleres donde se trabaja. Los del edificio están todos en el mismo lugar; los «Talleres de afuera» están fuera del edificio y llevan su dirección.",
+    pasos: ["Use «Nuevo taller», elija si está en el edificio o afuera y llene sus datos (la dirección solo para los de afuera).", "En «Mecánicos», edite a cada mecánico y elija su taller.", "Desmarque «Abierto» si una sede deja de atender por un tiempo."],
+    notas: ["Las piezas que se aprueban se llevan al taller del mecánico que las pidió.", "Un taller con mecánicos no se puede eliminar: cámbielos de taller primero."],
+  },
+  traslados: {
+    para: "Lo que hacen los auxiliares de operaciones y traslado: llevar piezas, recibir producto nuevo y traer o llevar vehículos.",
+    pasos: [
+      "Use «Nueva tarea» para pedir que traigan un vehículo al taller, lo lleven al cliente o reciban producto del proveedor.",
+      "Asígnela a un auxiliar o déjela para cualquiera: el primero que la acepte se la queda.",
+      "Al aceptar una petición de material se crea sola la tarea de llevar la pieza al taller del mecánico.",
+      "En «Entregas de material» vea quién llevó cada pieza y cuándo el mecánico confirmó que la recibió.",
+    ],
+    notas: ["Solo se cancela una tarea que nadie ha aceptado.", "Al marcar realizada una tarea de «Recibir producto», la cantidad entra sola al almacén."],
+  },
+  administracion: {
+    para: "Panel de la administración: el archivo de reportes y de comprobantes de cobro en PDF, el historial de entregas y los traslados realizados.",
+    pasos: ["En «Reportes (PDF)» abra o descargue la copia en PDF de cualquier reporte.",
+      "En «Comprobantes de cobro (PDF)» está cada pago, anticipo y venta con su comprobante y la nota que guardó el sistema.", "En «Historial de entregas» revise el material enviado y si el mecánico lo recibió.", "En «Tareas de traslado realizadas» vea lo que hicieron los auxiliares."],
+    notas: ["Cada reporte guarda su copia en PDF en el momento en que se envía.", "Las cuentas se crean en «Cuentas», incluidas las de auxiliar de operaciones y traslado."],
+  },
+});
+AYUDA_PERSONAL.bandeja.pasos[0] = "Peticiones: «Aceptar y enviar» descuenta el material del almacén, le avisa al mecánico y crea la tarea para que un auxiliar se la lleve a su taller; o rechácela con un motivo.";
+AYUDA_PERSONAL.bandeja.notas.push("Cada reporte trae el botón «PDF» con la copia que se guardó al enviarlo.");
+AYUDA_MECANICO.bandeja.pasos.push("Cuando le envíen material verá «Producto enviado»: al tenerlo en la mano, presione «Recibido».");
+AYUDA_PERSONAL.usuarios.notas[0] = "Roles: Administración (todo), Recepción (el día a día), Mecánico (solo su área) y Auxiliar de operaciones y traslado (su bandeja y sus trabajos).";
+AYUDA_PERSONAL.mecanicos.pasos.push("Elija el taller de cada mecánico: ahí le llevan las piezas que pide.");
+AYUDA_PERSONAL.cobros.notas.push("Cada pago, anticipo y venta guarda su comprobante en PDF: ábralo con «Comprobante» en «Ver pagos», en Ventas, en Anticipos o en Movimientos.");
+AYUDA_MECANICO.reportes.notas.push("Al enviarlo se guarda una copia en PDF; ábrala con el botón «PDF» de cada reporte.");
+
+const AYUDA_AUXILIAR = {
+  bandeja: {
+    para: "Los trabajos nuevos: piezas para llevar, producto para recibir y vehículos para traer o llevar.",
+    pasos: ["Lea la tarea: qué hay que hacer, a qué taller y para qué proyecto.", "Presione «Aceptar» para quedársela; pasa a «Trabajos»."],
+    notas: ["Las tareas «Para cualquier auxiliar» se las queda el primero que las acepte.", "Las piezas aprobadas por recepción llegan aquí solas."],
+  },
+  trabajos: {
+    para: "Los trabajos que aceptó y el historial de los que ya realizó.",
+    pasos: ["Haga el traslado o la recepción del producto.", "Presione «Marcar realizado» y, si quiere, deje una nota.", "El trabajo pasa a «Realizados» y recepción lo ve al instante."],
+    notas: ["Al realizar «Recibir producto», la cantidad entra sola al almacén."],
+  },
+};
+const FLUJO_AUXILIAR = [
+  "Recepción le asigna un trabajo o aprueba una pieza para llevar.",
+  "Lo acepta en su bandeja.",
+  "Hace el traslado o recibe el producto.",
+  "Lo marca como realizado: queda en el historial.",
+];
+
+// «?» abre la ayuda, salvo mientras se escribe en un campo o hay un diálogo abierto
+document.addEventListener("keydown", (evento) => {
+  if (evento.key !== "?" || $("#vista-app").hidden || dialogo.open || confirmacion.open || ayuda.open) return;
+  if (evento.target.closest("input, textarea, select, [contenteditable]")) return;
+  evento.preventDefault();
+  abrirAyuda();
+});
+
+/** Hace subir los números de las tarjetas de estadísticas al entrar a una sección. */
+function animarNumeros(raiz) {
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  raiz.querySelectorAll(".estadistica .valor").forEach((el) => {
+    if (el.children.length) return;
+    const texto = el.textContent.trim();
+    const esDinero = texto.startsWith("L");
+    const numero = Number(texto.replace(/[^0-9.-]/g, ""));
+    if (!texto || !Number.isFinite(numero) || numero === 0) return;
+    const inicio = performance.now();
+    const duracion = 750;
+    const paso = (ahora) => {
+      const avance = Math.min(1, (ahora - inicio) / duracion);
+      const suave = 1 - (1 - avance) ** 3;
+      el.textContent = avance < 1 ? (esDinero ? dinero(numero * suave) : String(Math.round(numero * suave))) : texto;
+      if (avance < 1) requestAnimationFrame(paso);
+    };
+    requestAnimationFrame(paso);
+  });
+}
+
+
+// ===================== Copias en PDF de los reportes =====================
+/** Baja un PDF de la API (con la sesión) y devuelve una dirección local para abrirlo o guardarlo. */
+async function bajarPdf(ruta) {
+  const respuesta = await fetch(ruta, { headers: { Authorization: `Bearer ${estado.token}` } });
+  if (!respuesta.ok) throw new Error(mensajeDeError(await respuesta.json().catch(() => null)));
+  return URL.createObjectURL(await respuesta.blob());
+}
+
+async function abrirPdf(ruta) {
+  const ventana = window.open("", "_blank"); // se abre ya, para que el navegador no la bloquee
+  try {
+    const url = await bajarPdf(ruta);
+    if (ventana) ventana.location.href = url;
+    else location.href = url;
+  } catch (error) {
+    ventana?.close();
+    aviso(error.message, "error");
+  }
+}
+
+async function descargarPdf(ruta, nombre) {
+  try {
+    const url = await bajarPdf(ruta);
+    const enlace = Object.assign(document.createElement("a"), { href: url, download: nombre });
+    enlace.click();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (error) {
+    aviso(error.message, "error");
+  }
+}
+
+const botonPdf = (ruta, texto = "PDF") =>
+  `<button type="button" class="boton boton-secundario boton-chico boton-pdf" data-pdf="${ruta}" title="Ver la copia en PDF">${icono("documento")} ${texto}</button>`;
+
+// ===================== Material enviado: «Recibido» =====================
+async function confirmarRecibido(boton) {
+  const resultado = await intentar(() => api(`/mecanico/peticiones/${boton.dataset.recibido}/recibido`, { metodo: "POST" }));
+  if (!resultado) return;
+  aviso(`Confirmó que recibió ${resultado.repuesto} × ${resultado.cantidad}`);
+  await refrescar();
+  if (dialogo.open && boton.dataset.trabajo) abrirTrabajo(Number(boton.dataset.trabajo));
+}
+
+const botonRecibido = (peticionId, ordenId) =>
+  `<button type="button" class="boton boton-primario boton-chico" data-recibido="${peticionId}" ${ordenId ? `data-trabajo="${ordenId}"` : ""}>${icono("check")} Recibido</button>`;
+
+// Botones que aparecen en varias pantallas: se atienden en un solo lugar
+document.addEventListener("click", (evento) => {
+  const pdf = evento.target.closest("[data-pdf]");
+  if (pdf) abrirPdf(pdf.dataset.pdf);
+  const descarga = evento.target.closest("[data-pdf-descargar]");
+  if (descarga) descargarPdf(descarga.dataset.pdfDescargar, descarga.dataset.nombre);
+  const recibido = evento.target.closest("[data-recibido]");
+  if (recibido) confirmarRecibido(recibido);
+});
+
+// ===================== Tareas de traslado (recepción, administración y auxiliares) =====================
+const TIPOS_TAREA = {
+  entregar_pieza: { nombre: "Llevar pieza", icono: "repuestos", clase: "insignia-premium" },
+  recibir_producto: { nombre: "Recibir producto", icono: "caja", clase: "insignia-ok" },
+  traer_vehiculo: { nombre: "Traer vehículo", icono: "vehiculos", clase: "insignia-baja" },
+  llevar_vehiculo: { nombre: "Llevar vehículo", icono: "vehiculos", clase: "insignia-lujo" },
+  otro: { nombre: "Otra tarea", icono: "check", clase: "insignia-neutra" },
+};
+const ESTADOS_TAREA = {
+  pendiente: { nombre: "Por aceptar", clase: "insignia-baja" },
+  aceptada: { nombre: "En curso", clase: "insignia-premium" },
+  realizada: { nombre: "Realizada", clase: "insignia-ok" },
+};
+const insigniaTipoTarea = (tipo) => `<span class="insignia ${TIPOS_TAREA[tipo].clase}">${icono(TIPOS_TAREA[tipo].icono)}${TIPOS_TAREA[tipo].nombre}</span>`;
+const insigniaEstadoTarea = (e) => `<span class="insignia ${ESTADOS_TAREA[e].clase}">${ESTADOS_TAREA[e].nombre}</span>`;
+
+/** Tarjeta de una tarea; `acciones` son los botones de abajo según quién la mira. */
+function tarjetaTarea(t, acciones = "", { verAuxiliar = true } = {}) {
+  const linea = (iconoNombre, texto) => `<li>${icono(iconoNombre)}<span>${texto}</span></li>`;
+  const datos = [
+    t.taller ? linea("taller", `<strong>${esc(t.taller)}</strong> · ${t.taller_direccion ? `afuera: ${esc(t.taller_direccion)}` : "en el edificio"}`) : "",
+    t.placa ? linea("vehiculos", `<span class="placa">${esc(t.placa)}</span> ${esc(t.vehiculo ?? "")}`) : "",
+    t.repuesto ? linea("caja", `${esc(t.repuesto)} × ${t.cantidad}`) : "",
+    t.orden_id ? linea("ordenes", `Proyecto #${t.orden_id}`) : "",
+    verAuxiliar ? linea("perfil", t.auxiliar ? esc(t.auxiliar) : "Cualquier auxiliar (el primero que la acepte)") : "",
+  ].join("");
+  const tiempos = [
+    `Creada ${fechaHora(t.fecha)}${t.creada_por ? ` por ${esc(t.creada_por)}` : ""}`,
+    t.aceptada_en ? `aceptada ${fechaHora(t.aceptada_en)}` : "",
+    t.realizada_en ? `realizada ${fechaHora(t.realizada_en)}` : "",
+  ].filter(Boolean).join(" · ");
+  return `
+    <article class="panel tarjeta-tarea estado-${t.estado}">
+      <div class="arriba">${insigniaTipoTarea(t.tipo)}${insigniaEstadoTarea(t.estado)}</div>
+      <strong class="titulo-tarea">${esc(t.titulo)}</strong>
+      ${t.detalle ? `<p>${esc(t.detalle)}</p>` : ""}
+      <ul class="datos-tarea">${datos}</ul>
+      ${t.nota ? `<p class="nota-tarea">${icono("check")}<span>«${esc(t.nota)}»</span></p>` : ""}
+      <span class="texto-tenue tiempos-tarea">${tiempos}</span>
+      ${acciones ? `<div class="acciones-tarjeta">${acciones}</div>` : ""}
+    </article>`;
+}
+
+/** Muestra u oculta los campos de un formulario según la opción elegida en unos radios. */
+function conectarGrupos(raiz, nombre, gruposPorValor) {
+  const sincronizar = () => {
+    const valor = raiz.querySelector(`input[name="${nombre}"]:checked`)?.value;
+    const visibles = gruposPorValor[valor] ?? [];
+    raiz.querySelectorAll("[data-grupo]").forEach((caja) => {
+      const visible = visibles.includes(caja.dataset.grupo);
+      caja.hidden = !visible;
+      caja.querySelectorAll("input, select, textarea").forEach((control) => (control.disabled = !visible));
+    });
+  };
+  raiz.querySelectorAll(`input[name="${nombre}"]`).forEach((radio) => radio.addEventListener("change", sincronizar));
+  sincronizar();
+}
+
+function formularioTarea() {
+  const talleres = estado.datos.talleres.filter((t) => t.activo);
+  const vehiculos = [...estado.datos.vehiculos].sort((a, b) => a.placa.localeCompare(b.placa));
+  abrirFormulario({
+    titulo: "Nueva tarea de traslado",
+    subtitulo: "Le llega a la bandeja de los auxiliares de operaciones y traslado",
+    campos: [
+      {
+        nombre: "tipo", etiqueta: "¿Qué hay que hacer?", tipo: "radios", numerico: false, requerido: true, completo: true, enLinea: true,
+        porDefecto: "traer_vehiculo",
+        opciones: [
+          { valor: "traer_vehiculo", texto: "Traer vehículo", detalle: "Del cliente a un taller" },
+          { valor: "llevar_vehiculo", texto: "Llevar vehículo", detalle: "De un taller al cliente" },
+          { valor: "recibir_producto", texto: "Recibir producto", detalle: "Mercadería nueva del proveedor" },
+          { valor: "otro", texto: "Otra tarea", detalle: "Algo distinto" },
+        ],
+      },
+      {
+        nombre: "vehiculo_id", etiqueta: "Vehículo", tipo: "select", requerido: true, grupo: "vehiculo",
+        opciones: vehiculos.map((v) => ({ valor: v.id, texto: `${v.placa} · ${v.marca} ${v.modelo} — ${porId(estado.datos.clientes, v.cliente_id)?.nombre ?? ""}` })),
+      },
+      {
+        nombre: "taller_id", etiqueta: "Taller", tipo: "select", requerido: true, grupo: "vehiculo",
+        opciones: talleres.map((t) => ({ valor: t.id, texto: t.ubicacion === "externo" ? `${t.nombre} · afuera: ${t.direccion}` : `${t.nombre} · en el edificio` })),
+      },
+      {
+        nombre: "orden_id", etiqueta: "Proyecto relacionado", tipo: "select", textoVacio: "Ninguno", completo: true, grupo: "vehiculo",
+        opciones: estado.datos.ordenes.filter((o) => o.estado !== "entregado").map((o) => ({
+          valor: o.id, texto: `#${o.id} · ${porId(estado.datos.vehiculos, o.vehiculo_id)?.placa ?? ""} · ${nombreEstado(o.estado)}`,
+        })),
+      },
+      {
+        nombre: "repuesto_id", etiqueta: "Producto que llega", tipo: "select", requerido: true, grupo: "producto",
+        opciones: estado.datos.repuestos.map((r) => ({ valor: r.id, texto: `${r.nombre} · hay ${r.existencia}` })),
+      },
+      { nombre: "cantidad", etiqueta: "Cantidad", tipo: "number", requerido: true, min: 1, max: 1000, paso: 1, porDefecto: 1, grupo: "producto",
+        ayuda: "Al marcarla realizada, entra al almacén" },
+      { nombre: "titulo", etiqueta: "Título", maxlength: 120, completo: true, ayuda: "Si lo deja vacío se arma solo (en «Otra tarea» es obligatorio)" },
+      { nombre: "detalle", etiqueta: "Indicaciones", tipo: "textarea", maxlength: 500, completo: true, ayuda: "Dirección, a quién buscar, horarios…" },
+      {
+        nombre: "asignado_a", etiqueta: "Auxiliar", tipo: "select", textoVacio: "Cualquier auxiliar (el primero que la acepte)", completo: true,
+        opciones: estado.datos.auxiliares.map((a) => ({ valor: a.id, texto: a.nombre || a.username })),
+      },
+    ],
+    textoBoton: "Asignar tarea",
+    enviar: async (datos) => {
+      const tarea = await api("/tareas", { metodo: "POST", datos });
+      aviso(`Tarea asignada: ${tarea.titulo}`);
+    },
+  });
+  conectarGrupos(dialogo, "tipo", { traer_vehiculo: ["vehiculo"], llevar_vehiculo: ["vehiculo"], recibir_producto: ["producto"], otro: [] });
+  // En «Otra tarea» el título es obligatorio; al elegir un proyecto se elige su vehículo
+  const titulo = $("#campo-titulo", dialogo);
+  dialogo.querySelectorAll('input[name="tipo"]').forEach((radio) =>
+    radio.addEventListener("change", () => (titulo.required = radio.value === "otro" && radio.checked)));
+  $("#campo-orden_id", dialogo).addEventListener("change", (e) => {
+    const orden = porId(estado.datos.ordenes, Number(e.target.value));
+    if (orden) $("#campo-vehiculo_id", dialogo).value = orden.vehiculo_id;
+  });
+}
+
+/** Historial de material enviado: quién lo llevó y cuándo lo recibió el mecánico. */
+function tablaEntregas(entregas) {
+  if (!entregas.length) return `<div class="vacio">${icono("camion")}<strong>Sin entregas todavía</strong><span>Cuando se acepte una petición de material aparecerá aquí.</span></div>`;
+  return `<div class="tabla-contenedor"><table>
+    <thead><tr><th>Aprobada</th><th>Material</th><th>Proyecto</th><th>Para</th><th>Traslado</th><th>Recibido</th></tr></thead>
+    <tbody>${entregas.map((e) => `<tr>
+      <td class="sin-saltos">${e.fecha_respuesta ? fechaHora(e.fecha_respuesta) : "—"}</td>
+      <td><strong>${esc(e.repuesto)}</strong> × ${e.cantidad}</td>
+      <td><div class="celda-doble"><strong>#${e.orden_id}</strong><span class="placa">${esc(e.placa)}</span></div></td>
+      <td><div class="celda-doble"><strong>${esc(e.mecanico)}</strong><span>${esc(e.taller ?? "Sin taller")}</span></div></td>
+      <td><div class="celda-doble">${e.estado_traslado ? insigniaEstadoTarea(e.estado_traslado) : `<span class="texto-tenue">—</span>`}
+        <span>${e.auxiliar ? esc(e.auxiliar) : "Sin auxiliar todavía"}${e.entregada_en ? ` · ${fechaHora(e.entregada_en)}` : ""}</span></div></td>
+      <td>${e.recibida_en ? `<span class="insignia insignia-ok">${icono("check")}${fechaHora(e.recibida_en)}</span>` : `<span class="insignia insignia-baja">Esperando</span>`}</td>
+    </tr>`).join("")}</tbody></table></div>`;
+}
+
+function pintarTraslados() {
+  const { tareas, entregas } = estado.datos;
+  const pestana = estado.pestanaTraslados ?? "pendiente";
+  const de = (e) => tareas.filter((t) => t.estado === e);
+  const sinConfirmar = entregas.filter((e) => !e.recibida_en);
+  const pestanas = [
+    ["pendiente", "Por aceptar", de("pendiente").length],
+    ["aceptada", "En curso", de("aceptada").length],
+    ["realizada", "Realizadas", de("realizada").length],
+    ["entregas", "Entregas de material", sinConfirmar.length],
+  ];
+  const lista = pestana === "entregas" ? null : de(pestana);
+  $("#vista").innerHTML = `
+    <div class="estadisticas">
+      <div class="panel estadistica alerta"><span class="etiqueta">${icono("bandeja")} Por aceptar</span><span class="valor">${de("pendiente").length}</span><span class="detalle">esperan a un auxiliar</span></div>
+      <div class="panel estadistica"><span class="etiqueta">${icono("camion")} En curso</span><span class="valor">${de("aceptada").length}</span><span class="detalle">un auxiliar ya las tomó</span></div>
+      <div class="panel estadistica"><span class="etiqueta">${icono("check")} Realizadas</span><span class="valor">${de("realizada").length}</span><span class="detalle">trabajos de traslado hechos</span></div>
+      <div class="panel estadistica"><span class="etiqueta">${icono("repuestos")} Sin confirmar</span><span class="valor">${sinConfirmar.length}</span><span class="detalle">material que el mecánico no ha marcado recibido</span></div>
+    </div>
+    <section class="panel">
+      <div class="barra-herramientas">
+        <div class="pestanas-filtro" role="tablist">
+          ${pestanas.map(([clave, texto, n]) => `<button type="button" class="pestana-filtro ${clave === pestana ? "activa" : ""}" data-pestana-traslado="${clave}">${texto} <span class="cuenta-pestana">${n}</span></button>`).join("")}
+        </div>
+      </div>
+      ${pestana === "entregas" ? tablaEntregas(entregas)
+        : lista.length ? `<div class="rejilla-tareas">${lista.map((t) => tarjetaTarea(t,
+            t.estado === "pendiente" && !t.peticion_id ? `<button type="button" class="boton boton-peligro boton-chico" data-cancelar-tarea="${t.id}">${icono("cerrar")} Cancelar</button>` : "")).join("")}</div>`
+        : `<div class="vacio">${icono("camion")}<strong>Nada por aquí</strong><span>${pestana === "pendiente" ? "Use «Nueva tarea» para pedir que traigan o lleven un vehículo, o que reciban producto." : "No hay tareas en este estado."}</span></div>`}
+    </section>`;
+
+  $("#vista").querySelectorAll("[data-pestana-traslado]").forEach((b) =>
+    b.addEventListener("click", () => { estado.pestanaTraslados = b.dataset.pestanaTraslado; pintarTraslados(); }));
+  $("#vista").querySelectorAll("[data-cancelar-tarea]").forEach((b) => b.addEventListener("click", async () => {
+    const seguro = await confirmar({ titulo: "¿Cancelar la tarea?", texto: "Se quitará de la bandeja de los auxiliares.", boton: "Cancelar tarea" });
+    if (seguro && (await intentar(() => api(`/tareas/${b.dataset.cancelarTarea}`, { metodo: "DELETE" })))) {
+      aviso("Tarea cancelada");
+      await refrescar();
+    }
+  }));
+}
+
+// ===================== Administración =====================
+function pintarAdministracion() {
+  const { reportesTaller: reportes, entregas, tareas, usuarios, comprobantes } = estado.datos;
+  const pestana = estado.pestanaAdmin ?? "reportes";
+  const termino = (estado.buscarAdmin ?? "").toLowerCase();
+  const porRol = (rol) => usuarios.filter((u) => u.rol === rol).length;
+  const filtrados = reportes.filter((r) => `${r.id} ${r.titulo} ${r.descripcion} ${r.mecanico} ${r.sobre_mecanico ?? ""}`.toLowerCase().includes(termino));
+  const pestanas = [["reportes", "Reportes (PDF)"], ["comprobantes", "Comprobantes de cobro (PDF)"], ["entregas", "Historial de entregas"], ["tareas", "Traslados realizados"]];
+  const cobrosFiltrados = comprobantes.filter((c) => `${c.numero} ${c.concepto} ${c.pagador} ${c.identidad ?? ""} ${c.nota}`.toLowerCase().includes(termino));
+
+  let contenido;
+  if (pestana === "reportes") {
+    contenido = `
+      <div class="barra-herramientas"><label class="buscador">${icono("buscar")}
+        <input id="buscar-admin" type="search" placeholder="Buscar por número, título o mecánico…" value="${esc(estado.buscarAdmin ?? "")}" aria-label="Buscar reportes" /></label>
+        <span class="conteo">${filtrados.length} de ${reportes.length}</span></div>
+      ${filtrados.length ? `<div class="tabla-contenedor"><table>
+        <thead><tr><th>#</th><th>Enviado</th><th>Reporte</th><th>Tipo</th><th>Por</th><th>Estado</th><th></th></tr></thead>
+        <tbody>${filtrados.map((r) => `<tr>
+          <td class="mono">${r.id}</td>
+          <td class="sin-saltos">${fechaHora(r.fecha)}</td>
+          <td class="col-descripcion"><div class="celda-doble"><strong>${esc(r.titulo)}</strong><span>${r.orden_id ? `Proyecto #${r.orden_id}` : "Sin proyecto"}${r.sobre_mecanico ? ` · sobre ${esc(r.sobre_mecanico)}` : ""}</span></div></td>
+          <td>${r.tipo === "desempeno" ? `<span class="insignia insignia-lujo">${icono("estrella")}Del líder</span>` : `<span class="insignia insignia-neutra">${esc(TIPOS_REPORTE[r.tipo])}</span>`}</td>
+          <td>${esc(r.mecanico)}</td>
+          <td><span class="insignia ${r.estado === "resuelto" ? "insignia-ok" : "insignia-baja"}">${r.estado === "resuelto" ? "Resuelto" : "Abierto"}</span></td>
+          <td class="acciones-fila">
+            ${r.tiene_pdf ? `${botonPdf(`/reportes/${r.id}/pdf`, "Ver")}
+            <button type="button" class="boton boton-icono" data-pdf-descargar="/reportes/${r.id}/pdf" data-nombre="reporte-${r.id}.pdf" aria-label="Descargar PDF" title="Descargar PDF">${icono("descargar")}</button>` : `<span class="texto-tenue">Sin copia</span>`}
+          </td></tr>`).join("")}</tbody></table></div>`
+        : `<div class="vacio">${icono("documento")}<strong>${termino ? "Sin resultados" : "Todavía no hay reportes"}</strong><span>Cada reporte que envían los mecánicos guarda aquí su copia en PDF.</span></div>`}`;
+  } else if (pestana === "comprobantes") {
+    const nombreTipo = { pago: "Pago", anticipo: "Anticipo", venta: "Venta" };
+    const claseTipo = { pago: "insignia-ok", anticipo: "insignia-premium", venta: "insignia-lujo" };
+    contenido = `
+      <div class="barra-herramientas"><label class="buscador">${icono("buscar")}
+        <input id="buscar-admin" type="search" placeholder="Buscar por número, cliente, ID o nota…" value="${esc(estado.buscarAdmin ?? "")}" aria-label="Buscar comprobantes" /></label>
+        <span class="conteo">${cobrosFiltrados.length} de ${comprobantes.length}</span></div>
+      ${cobrosFiltrados.length ? `<div class="tabla-contenedor"><table>
+        <thead><tr><th>Comprobante</th><th>Fecha</th><th>Concepto</th><th>Pagó</th><th class="numero">Monto</th><th class="col-descripcion">Nota del sistema</th><th></th></tr></thead>
+        <tbody>${cobrosFiltrados.map((c) => `<tr>
+          <td><div class="celda-doble"><strong class="mono">${esc(c.numero)}</strong><span><span class="insignia ${claseTipo[c.tipo]}">${nombreTipo[c.tipo]}</span></span></div></td>
+          <td class="sin-saltos">${fechaHora(c.fecha)}</td>
+          <td>${esc(c.concepto)}</td>
+          <td><div class="celda-doble"><strong>${esc(c.pagador ?? "—")}</strong><span class="mono">${esc(c.identidad ?? "")}</span></div></td>
+          <td class="numero"><strong>${dinero(c.monto)}</strong></td>
+          <td class="col-descripcion nota-sistema">${icono("documento")}<span>${esc(c.nota)}${c.registrado_por ? ` · registró ${esc(c.registrado_por)}` : ""}</span></td>
+          <td class="acciones-fila">${botonPdf(c.pdf, "Ver")}
+            <button type="button" class="boton boton-icono" data-pdf-descargar="${c.pdf}" data-nombre="comprobante-${c.numero}.pdf" aria-label="Descargar PDF" title="Descargar PDF">${icono("descargar")}</button></td>
+        </tr>`).join("")}</tbody></table></div>`
+        : `<div class="vacio">${icono("dinero")}<strong>${termino ? "Sin resultados" : "Todavía no hay cobros"}</strong><span>Cada pago, anticipo y venta guarda aquí su comprobante en PDF.</span></div>`}`;
+  } else if (pestana === "entregas") {
+    contenido = tablaEntregas(entregas);
+  } else {
+    const hechas = tareas.filter((t) => t.estado === "realizada");
+    contenido = hechas.length ? `<div class="rejilla-tareas">${hechas.map((t) => tarjetaTarea(t)).join("")}</div>`
+      : `<div class="vacio">${icono("camion")}<strong>Sin tareas realizadas</strong><span>Lo que marquen los auxiliares como realizado queda aquí.</span></div>`;
+  }
+
+  $("#vista").innerHTML = `
+    <div class="estadisticas">
+      <div class="panel estadistica"><span class="etiqueta">${icono("documento")} Documentos archivados</span><span class="valor">${reportes.filter((r) => r.tiene_pdf).length + comprobantes.length}</span><span class="detalle">${reportes.filter((r) => r.tiene_pdf).length} reportes · ${comprobantes.length} comprobantes de cobro</span></div>
+      <div class="panel estadistica alerta"><span class="etiqueta">${icono("repuestos")} Entregas sin confirmar</span><span class="valor">${entregas.filter((e) => !e.recibida_en).length}</span><span class="detalle">de ${entregas.length} ${entregas.length === 1 ? "envío" : "envíos"} de material</span></div>
+      <div class="panel estadistica"><span class="etiqueta">${icono("camion")} Traslados pendientes</span><span class="valor">${tareas.filter((t) => t.estado !== "realizada").length}</span><span class="detalle">por aceptar o en curso</span></div>
+      <div class="panel estadistica"><span class="etiqueta">${icono("usuarios")} Cuentas</span><span class="valor">${usuarios.length}</span>
+        <span class="detalle">${porRol("recepcion")} recepción · ${porRol("mecanico")} mecánicos · ${porRol("auxiliar")} auxiliares</span></div>
+    </div>
+    <section class="panel">
+      <div class="barra-herramientas"><div class="pestanas-filtro" role="tablist">
+        ${pestanas.map(([clave, texto]) => `<button type="button" class="pestana-filtro ${clave === pestana ? "activa" : ""}" data-pestana-admin="${clave}">${texto}</button>`).join("")}
+      </div></div>
+      ${contenido}
+    </section>`;
+
+  $("#vista").querySelectorAll("[data-pestana-admin]").forEach((b) =>
+    b.addEventListener("click", () => { estado.pestanaAdmin = b.dataset.pestanaAdmin; estado.buscarAdmin = ""; pintarAdministracion(); }));
+  $("#buscar-admin")?.addEventListener("input", (e) => {
+    estado.buscarAdmin = e.target.value;
+    const posicion = e.target.selectionStart;
+    pintarAdministracion();
+    const nuevo = $("#buscar-admin");
+    nuevo.focus();
+    nuevo.setSelectionRange(posicion, posicion);
+  });
+}
+
+// ===================== Área del auxiliar de operaciones y traslado =====================
+const misTareas = () => estado.datos.tareas.filter((t) => t.asignado_a === estado.yo.id);
+
+function pintarBandejaAuxiliar() {
+  const nuevas = estado.datos.tareas.filter((t) => t.estado === "pendiente");
+  $("#vista").innerHTML = `
+    <section class="panel">
+      <div class="panel-encabezado"><h2>Trabajos por recibir <span class="conteo">${nuevas.length}</span></h2></div>
+      ${nuevas.length ? `<div class="rejilla-tareas rejilla-tareas-panel">${nuevas.map((t) => tarjetaTarea(t,
+          `<span class="texto-tenue para-quien">${t.asignado_a ? "Asignada a usted" : "Para cualquier auxiliar"}</span>
+           <button type="button" class="boton boton-primario boton-chico" data-aceptar-tarea="${t.id}">${icono("check")} Aceptar</button>`,
+          { verAuxiliar: false })).join("")}</div>`
+        : `<div class="vacio">${icono("bandeja")}<strong>No hay trabajos nuevos</strong><span>Cuando recepción le asigne algo, o apruebe una pieza para llevar, aparecerá aquí.</span></div>`}
+    </section>`;
+  $("#vista").querySelectorAll("[data-aceptar-tarea]").forEach((b) => b.addEventListener("click", async () => {
+    b.disabled = true;
+    const tarea = await intentar(() => api(`/auxiliar/tareas/${b.dataset.aceptarTarea}/aceptar`, { metodo: "POST" }));
+    if (tarea) {
+      aviso("Trabajo aceptado: lo encuentra en «Trabajos»");
+      await refrescar();
+    } else b.disabled = false;
+  }));
+}
+
+function pintarTrabajosAuxiliar() {
+  const enCurso = misTareas().filter((t) => t.estado === "aceptada");
+  const hechas = misTareas().filter((t) => t.estado === "realizada");
+  $("#vista").innerHTML = `
+    <section class="panel">
+      <div class="panel-encabezado"><h2>En curso <span class="conteo">${enCurso.length}</span></h2></div>
+      ${enCurso.length ? `<div class="rejilla-tareas rejilla-tareas-panel">${enCurso.map((t) => tarjetaTarea(t,
+          `<button type="button" class="boton boton-primario boton-chico" data-realizar-tarea="${t.id}">${icono("check")} Marcar realizado</button>`,
+          { verAuxiliar: false })).join("")}</div>`
+        : `<div class="vacio">${icono("camion")}<strong>Sin trabajos en curso</strong><span>Acepte un trabajo en su bandeja para empezarlo.</span></div>`}
+    </section>
+    <section class="panel">
+      <div class="panel-encabezado"><h2>Realizados <span class="conteo">${hechas.length}</span></h2></div>
+      ${hechas.length ? `<div class="rejilla-tareas rejilla-tareas-panel">${hechas.map((t) => tarjetaTarea(t, "", { verAuxiliar: false })).join("")}</div>`
+        : `<p class="vacio-chico">Aquí quedan los trabajos que marque como realizados.</p>`}
+    </section>`;
+  $("#vista").querySelectorAll("[data-realizar-tarea]").forEach((b) => b.addEventListener("click", () => {
+    const tarea = porId(estado.datos.tareas, Number(b.dataset.realizarTarea));
+    abrirFormulario({
+      titulo: "Marcar como realizado",
+      subtitulo: tarea.titulo,
+      campos: [{ nombre: "nota", etiqueta: "Nota (opcional)", tipo: "textarea", maxlength: 300, completo: true, ayuda: "Por ejemplo: a quién se lo entregó o dónde dejó el vehículo" }],
+      textoBoton: "Realizado",
+      enviar: async (datos) => {
+        await api(`/auxiliar/tareas/${tarea.id}/realizada`, { metodo: "POST", datos });
+        aviso(tarea.tipo === "recibir_producto" ? "Realizado: el producto ya entró al almacén" : "Trabajo marcado como realizado");
+      },
+    });
+  }));
+}
+
 // ===================== Navegación =====================
 const VISTAS_PERSONAL = {
-  resumen: { titulo: "Resumen", subtitulo: "Así está el taller hoy", icono: "resumen", pintar: pintarResumen },
-  ordenes: { titulo: "Proyectos", subtitulo: "Proyectos de trabajo: vehículo, cliente, problema y equipo", icono: "ordenes", pintar: pintarOrdenes,
+  resumen: { titulo: "Resumen", icono: "resumen", pintar: pintarResumen },
+  ordenes: { titulo: "Proyectos", icono: "ordenes", pintar: pintarOrdenes,
     boton: "Nuevo proyecto", nuevo: () => formularioOrden(), cuenta: () => ordenesActivas().length },
-  bandeja: { titulo: "Bandeja", subtitulo: "Peticiones, reportes, avisos y mensajes de los mecánicos", icono: "bandeja", pintar: pintarBandeja,
+  bandeja: { titulo: "Bandeja", icono: "bandeja", pintar: pintarBandeja,
     cuenta: () => pendientesBandeja() },
-  cobros: { titulo: "Cobros", subtitulo: "Pagos y anticipos de trabajos, ventas de repuestos y saldos pendientes", icono: "dinero", pintar: pintarCobros,
+  cobros: { titulo: "Cobros", icono: "dinero", pintar: pintarCobros,
     boton: "Registrar pago", nuevo: () => elegirTipoDePago(), cuenta: () => estado.datos.cobros.filter((c) => c.saldo > 0).length },
-  anticipos: { titulo: "Anticipos", subtitulo: "Pagos anticipados: adelantos de proyectos que todavía no están listos", icono: "anticipo",
-    pintar: pintarAnticipos, boton: "Registrar anticipo", nuevo: () => registrarPago(undefined, "anticipo") },
-  movimientos: { titulo: "Movimientos", subtitulo: "Historial de pagos, solicitudes aceptadas y repuestos vendidos o usados", icono: "reloj", pintar: pintarMovimientos },
-  repuestos: { titulo: "Almacén", subtitulo: "Inventario de repuestos; con «Enviar» se manda material a un proyecto", icono: "repuestos" },
-  puntuaciones: { titulo: "Puntuaciones", subtitulo: "Créditos de los mecánicos y proyectos por calificar", icono: "estrella", pintar: pintarPuntuaciones,
+  movimientos: { titulo: "Movimientos", icono: "reloj", pintar: pintarMovimientos },
+  traslados: { titulo: "Traslados", icono: "camion", pintar: pintarTraslados, boton: "Nueva tarea", nuevo: () => formularioTarea(),
+    cuenta: () => estado.datos.tareas.filter((t) => t.estado !== "realizada").length },
+  repuestos: { titulo: "Almacén", icono: "repuestos" },
+  puntuaciones: { titulo: "Puntuaciones", icono: "estrella", pintar: pintarPuntuaciones,
     cuenta: () => estado.datos.ordenes.filter((o) => o.estado === "listo").length },
-  vehiculos: { titulo: "Vehículos", subtitulo: "Organizados por escala de trabajo; con el reloj se ve su historial", icono: "vehiculos" },
-  clientes: { titulo: "Clientes", subtitulo: "Organizados por la escala de trabajo de sus autos", icono: "clientes" },
-  mecanicos: { titulo: "Mecánicos", subtitulo: "Equipo de trabajo, niveles y créditos", icono: "mecanicos" },
-  usuarios: { titulo: "Cuentas", subtitulo: "Accesos que entrega la empresa", icono: "usuarios", soloAdministrador: true },
+  vehiculos: { titulo: "Vehículos", icono: "vehiculos" },
+  clientes: { titulo: "Clientes", icono: "clientes" },
+  mecanicos: { titulo: "Mecánicos", icono: "mecanicos" },
+  talleres: { titulo: "Talleres", icono: "taller" },
+  usuarios: { titulo: "Cuentas", icono: "usuarios", soloAdministrador: true },
+  administracion: { titulo: "Administración", icono: "escudo", pintar: pintarAdministracion, soloAdministrador: true },
 };
 for (const clave of Object.keys(MODULOS)) {
   VISTAS_PERSONAL[clave].pintar = () => pintarModulo(clave);
@@ -2691,13 +3409,20 @@ for (const clave of Object.keys(MODULOS)) {
 }
 
 const VISTAS_MECANICO = {
-  trabajos: { titulo: "Mis trabajos", subtitulo: "Vehículos que le asignó recepción", icono: "ordenes", pintar: pintarTrabajos,
+  trabajos: { titulo: "Mis trabajos", icono: "ordenes", pintar: pintarTrabajos,
     cuenta: () => estado.datos.trabajos.filter((t) => ESTADOS_EDITABLES.includes(t.estado)).length },
-  bandeja: { titulo: "Bandeja", subtitulo: "Mensajes nuevos e historial de la conversación con recepción", icono: "bandeja", pintar: pintarBandejaMecanico,
+  bandeja: { titulo: "Bandeja", icono: "bandeja", pintar: pintarBandejaMecanico,
     cuenta: () => estado.datos.mensajes.filter((m) => m.direccion === "a_mecanico" && !m.leido).length },
-  reportes: { titulo: "Reportes", subtitulo: "Avise a recepción lo que pase con el equipo o el taller", icono: "reporte", pintar: pintarReportes,
+  reportes: { titulo: "Reportes", icono: "reporte", pintar: pintarReportes,
     cuenta: () => estado.datos.reportes.filter((r) => r.estado === "abierto").length },
-  perfil: { titulo: "Mi perfil", subtitulo: "Sus datos, su nivel y sus créditos", icono: "perfil", pintar: pintarPerfil },
+  perfil: { titulo: "Mi perfil", icono: "perfil", pintar: pintarPerfil },
+};
+
+const VISTAS_AUXILIAR = {
+  bandeja: { titulo: "Bandeja", icono: "bandeja", pintar: pintarBandejaAuxiliar,
+    cuenta: () => estado.datos.tareas.filter((t) => t.estado === "pendiente").length },
+  trabajos: { titulo: "Trabajos", icono: "camion", pintar: pintarTrabajosAuxiliar,
+    cuenta: () => misTareas().filter((t) => t.estado === "aceptada").length },
 };
 
 function pintarMenu() {
@@ -2712,13 +3437,34 @@ function pintarVista() {
   const vista = estado.vistas[estado.vista];
   document.title = `${vista.titulo} · Taller Mecánico`;
   $("#titulo-vista").textContent = vista.titulo;
-  $("#subtitulo-vista").textContent = vista.subtitulo;
+  // Encabezado: ícono de la sección, área de quien entra y la fecha de hoy
+  $("#icono-vista").innerHTML = icono(vista.icono);
+  $("#area-vista").textContent = esMecanico() ? "Área del mecánico" : esAuxiliar() ? "Operaciones y traslado" : `Panel de ${ROLES[estado.yo.rol].toLowerCase()}`;
+  const hoyTexto = new Date().toLocaleDateString("es-HN", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+  $("#fecha-vista").innerHTML = `${icono("calendario")}<span>${esc(hoyTexto[0].toUpperCase() + hoyTexto.slice(1))}</span>`;
   $("#acciones-vista").innerHTML = vista.boton
     ? `<button type="button" class="boton boton-primario" id="boton-nuevo">${icono("mas")} ${esc(vista.boton)}</button>`
     : "";
   $("#boton-nuevo")?.addEventListener("click", vista.nuevo);
+  $("#boton-ayuda").onclick = () => abrirAyuda();
   pintarMenu();
+  // Al cambiar de sección el contenido entra con una animación suave y los números suben
+  const cambio = estado.vistaPintada !== estado.vista;
+  estado.vistaPintada = estado.vista;
   vista.pintar();
+  if (cambio) {
+    for (const elemento of [$("#vista"), $(".encabezado")]) {
+      elemento.classList.remove("animar");
+      void elemento.offsetWidth; // reinicia la animación
+      elemento.classList.add("animar");
+    }
+    animarNumeros($("#vista"));
+    clearTimeout(estado.temporizadorAnimacion);
+    estado.temporizadorAnimacion = setTimeout(() => {
+      $("#vista").classList.remove("animar");
+      $(".encabezado").classList.remove("animar");
+    }, 1200);
+  }
 }
 
 async function refrescar() {
@@ -2750,6 +3496,8 @@ async function mostrarApp() {
   estado.yo = await api("/auth/yo");
   if (esMecanico()) {
     estado.vistas = VISTAS_MECANICO;
+  } else if (esAuxiliar()) {
+    estado.vistas = VISTAS_AUXILIAR;
   } else {
     estado.vistas = Object.fromEntries(
       Object.entries(VISTAS_PERSONAL).filter(([, v]) => !v.soloAdministrador || estado.yo.rol === "administrador")

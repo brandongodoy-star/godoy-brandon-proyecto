@@ -1,5 +1,6 @@
 PRAGMA foreign_keys = ON;
 
+DROP TABLE IF EXISTS tareas;
 DROP TABLE IF EXISTS movimientos;
 DROP TABLE IF EXISTS ventas;
 DROP TABLE IF EXISTS mensajes;
@@ -14,6 +15,7 @@ DROP TABLE IF EXISTS detalle_orden;
 DROP TABLE IF EXISTS ordenes_servicio;
 DROP TABLE IF EXISTS repuestos;
 DROP TABLE IF EXISTS mecanicos;
+DROP TABLE IF EXISTS talleres;
 DROP TABLE IF EXISTS vehiculos;
 DROP TABLE IF EXISTS clientes;
 
@@ -35,6 +37,20 @@ CREATE TABLE vehiculos (
     FOREIGN KEY (cliente_id) REFERENCES clientes(id)
 );
 
+-- Talleres. Los del edificio están en el mismo lugar; los de afuera (rectificadoras, pintura…)
+-- tienen su dirección. Cada mecánico trabaja en uno; ahí le llevan las piezas y los vehículos.
+CREATE TABLE talleres (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre    TEXT NOT NULL UNIQUE,
+    ubicacion TEXT NOT NULL DEFAULT 'edificio' CHECK (ubicacion IN ('edificio', 'externo')),
+    direccion TEXT,  -- solo los talleres de afuera; los del edificio están todos en el mismo lugar
+    telefono  TEXT,
+    encargado TEXT,
+    horario   TEXT,
+    capacidad INTEGER CHECK (capacidad IS NULL OR capacidad > 0),  -- vehículos que caben a la vez
+    activo    INTEGER NOT NULL DEFAULT 1 CHECK (activo IN (0, 1))
+);
+
 CREATE TABLE mecanicos (
     id                 INTEGER PRIMARY KEY AUTOINCREMENT,
     nombre             TEXT NOT NULL,
@@ -43,7 +59,8 @@ CREATE TABLE mecanicos (
     telefono           TEXT,
     correo             TEXT,
     fecha_contratacion TEXT,
-    creditos           INTEGER NOT NULL DEFAULT 0 CHECK (creditos >= 0)
+    creditos           INTEGER NOT NULL DEFAULT 0 CHECK (creditos >= 0),
+    taller_id          INTEGER REFERENCES talleres(id)
 );
 
 CREATE TABLE repuestos (
@@ -83,7 +100,7 @@ CREATE TABLE usuarios (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     username      TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
-    rol           TEXT NOT NULL CHECK (rol IN ('administrador', 'recepcion', 'mecanico')),
+    rol           TEXT NOT NULL CHECK (rol IN ('administrador', 'recepcion', 'mecanico', 'auxiliar')),
     nombre        TEXT,
     mecanico_id   INTEGER REFERENCES mecanicos(id)
 );
@@ -123,7 +140,8 @@ CREATE TABLE reportes (
     fecha             TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
     sobre_mecanico_id INTEGER REFERENCES mecanicos(id),
     penalizacion      INTEGER,  -- créditos que recepción le bajó al reportado al resolverlo
-    comentario        TEXT      -- lo que recepción respondió al resolverlo
+    comentario        TEXT,     -- lo que recepción respondió al resolverlo
+    pdf               BLOB      -- copia en PDF que se guarda al enviar el reporte
 );
 
 -- Mensajería entre recepción y los mecánicos. mecanico_id es el mecánico de la conversación;
@@ -137,7 +155,8 @@ CREATE TABLE mensajes (
     orden_id    INTEGER REFERENCES ordenes_servicio(id) ON DELETE SET NULL,
     leido       INTEGER NOT NULL DEFAULT 0 CHECK (leido IN (0, 1)),
     fecha       TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
-    direccion   TEXT NOT NULL DEFAULT 'a_mecanico' CHECK (direccion IN ('a_mecanico', 'a_recepcion'))
+    direccion   TEXT NOT NULL DEFAULT 'a_mecanico' CHECK (direccion IN ('a_mecanico', 'a_recepcion')),
+    peticion_id INTEGER REFERENCES peticiones(id) ON DELETE SET NULL  -- aviso de «producto enviado»
 );
 
 -- Equipo de cada orden: el líder es ordenes_servicio.mecanico_id y aquí van los demás.
@@ -170,7 +189,8 @@ CREATE TABLE pagos (
     tarjeta_ultimos4  TEXT,
     tarjeta_titular   TEXT,
     autorizacion      TEXT,
-    banco             TEXT
+    banco             TEXT,
+    pdf               BLOB  -- comprobante en PDF que se guarda al registrar el pago
 );
 
 -- Venta de un repuesto suelto (producto individual), sin proyecto de taller
@@ -192,7 +212,8 @@ CREATE TABLE ventas (
     autorizacion      TEXT,
     banco             TEXT,
     registrado_por    TEXT,
-    fecha             TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+    fecha             TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    pdf               BLOB  -- comprobante en PDF de la venta
 );
 
 -- Historial de movimientos: pagos, ventas, solicitudes aceptadas y repuestos usados o devueltos
@@ -206,7 +227,9 @@ CREATE TABLE movimientos (
     repuesto_id INTEGER REFERENCES repuestos(id) ON DELETE SET NULL,
     orden_id    INTEGER REFERENCES ordenes_servicio(id) ON DELETE SET NULL,
     usuario     TEXT,
-    fecha       TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+    fecha       TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    pago_id     INTEGER REFERENCES pagos(id) ON DELETE SET NULL,  -- para abrir su comprobante
+    venta_id    INTEGER REFERENCES ventas(id) ON DELETE SET NULL
 );
 
 -- Materiales que los mecánicos piden al almacén; recepción los envía o los rechaza
@@ -220,7 +243,32 @@ CREATE TABLE peticiones (
     estado          TEXT NOT NULL DEFAULT 'pendiente' CHECK (estado IN ('pendiente', 'enviada', 'rechazada')),
     respuesta       TEXT,
     fecha           TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
-    fecha_respuesta TEXT
+    fecha_respuesta TEXT,
+    recibida_en     TEXT  -- cuándo el mecánico confirmó que le llegó el material
+);
+
+-- Tareas de los auxiliares de operaciones y traslado: llevar piezas a los talleres, recibir
+-- producto nuevo del proveedor y traer o llevar vehículos. Recepción las asigna (o quedan para
+-- cualquier auxiliar); el auxiliar las acepta y las marca como realizadas.
+CREATE TABLE tareas (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    tipo         TEXT NOT NULL CHECK (tipo IN ('entregar_pieza', 'recibir_producto', 'traer_vehiculo',
+                                               'llevar_vehiculo', 'otro')),
+    titulo       TEXT NOT NULL,
+    detalle      TEXT,
+    taller_id    INTEGER REFERENCES talleres(id) ON DELETE SET NULL,
+    orden_id     INTEGER REFERENCES ordenes_servicio(id) ON DELETE SET NULL,
+    vehiculo_id  INTEGER REFERENCES vehiculos(id) ON DELETE SET NULL,
+    repuesto_id  INTEGER REFERENCES repuestos(id) ON DELETE SET NULL,
+    cantidad     INTEGER CHECK (cantidad IS NULL OR cantidad > 0),
+    peticion_id  INTEGER REFERENCES peticiones(id) ON DELETE SET NULL,
+    asignado_a   INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+    estado       TEXT NOT NULL DEFAULT 'pendiente' CHECK (estado IN ('pendiente', 'aceptada', 'realizada')),
+    creada_por   TEXT,
+    nota         TEXT,  -- lo que anotó el auxiliar al terminar
+    fecha        TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    aceptada_en  TEXT,
+    realizada_en TEXT
 );
 
 
@@ -250,16 +298,25 @@ INSERT INTO vehiculos (placa, marca, modelo, anio, cliente_id, categoria) VALUES
 ('HKL-4821', 'BMW',           'X5',       2022, 3,  'lujo'),
 ('HLM-9036', 'Mercedes-Benz', 'Clase C',  2021, 6,  'lujo');
 
-INSERT INTO mecanicos (nombre, especialidad, activo, telefono, correo, fecha_contratacion, creditos) VALUES
-('Marvin Cruz',   'Motor',               1, '9811-2201', 'marvin.cruz@taller.hn',   '2018-03-12', 320),
-('Oscar Lagos',   'Frenos y suspensión', 1, '9822-3302', 'oscar.lagos@taller.hn',   '2021-07-01', 80),
-('Denis Soto',    'Electricidad',        1, '9833-4403', 'denis.soto@taller.hn',    '2020-01-15', 150),
-('Wilmer Paz',    'Transmisión',         1, '9844-5504', 'wilmer.paz@taller.hn',    '2022-05-09', 120),
-('Hugo Banegas',  'Mecánica general',    0, '9855-6605', 'hugo.banegas@taller.hn',  '2016-11-20', 30),
+-- Los tres primeros están en el edificio; el último es un taller de afuera
+INSERT INTO talleres (nombre, telefono, encargado, horario, capacidad) VALUES
+('Taller Central',                 '2232-1100', 'Marvin Cruz', 'Lunes a sábado, 7:00 a. m. a 5:00 p. m.', 8),
+('Taller Norte',                   '2245-3300', 'Denis Soto',  'Lunes a viernes, 8:00 a. m. a 5:00 p. m.', 5),
+('Taller de Carrocería y Pintura', '2238-7700', 'Wilmer Paz',  'Lunes a viernes, 7:30 a. m. a 4:30 p. m.', 4);
+INSERT INTO talleres (nombre, ubicacion, direccion, telefono, encargado, horario) VALUES
+('Rectificadora El Pistón', 'externo', 'Col. Miraflores, bulevar Suyapa, frente al parque', '2231-4455', 'Óscar Medina',
+ 'Lunes a viernes, 8:00 a. m. a 5:00 p. m.');
+
+INSERT INTO mecanicos (nombre, especialidad, activo, telefono, correo, fecha_contratacion, creditos, taller_id) VALUES
+('Marvin Cruz',   'Motor',               1, '9811-2201', 'marvin.cruz@taller.hn',   '2018-03-12', 320, 1),
+('Oscar Lagos',   'Frenos y suspensión', 1, '9822-3302', 'oscar.lagos@taller.hn',   '2021-07-01', 80,  1),
+('Denis Soto',    'Electricidad',        1, '9833-4403', 'denis.soto@taller.hn',    '2020-01-15', 150, 2),
+('Wilmer Paz',    'Transmisión',         1, '9844-5504', 'wilmer.paz@taller.hn',    '2022-05-09', 120, 3),
+('Hugo Banegas',  'Mecánica general',    0, '9855-6605', 'hugo.banegas@taller.hn',  '2016-11-20', 30,  2),
 -- Libres (sin proyecto activo), uno de cada nivel, para poder armar proyectos nuevos
-('Kevin Rivera',  'Mecánica general',    1, '9866-7706', 'kevin.rivera@taller.hn',  '2025-02-03', 40),
-('Josué Martínez','Suspensión',          1, '9877-8807', 'josue.martinez@taller.hn','2021-09-13', 140),
-('Ramón Pineda',  'Motor y diagnóstico', 1, '9888-9908', 'ramon.pineda@taller.hn',  '2014-06-30', 270);
+('Kevin Rivera',  'Mecánica general',    1, '9866-7706', 'kevin.rivera@taller.hn',  '2025-02-03', 40,  1),
+('Josué Martínez','Suspensión',          1, '9877-8807', 'josue.martinez@taller.hn','2021-09-13', 140, 2),
+('Ramón Pineda',  'Motor y diagnóstico', 1, '9888-9908', 'ramon.pineda@taller.hn',  '2014-06-30', 270, 1);
 
 INSERT INTO repuestos (nombre, precio, existencia) VALUES
 ('Filtro de aceite',      120.00, 40),
@@ -349,9 +406,9 @@ INSERT INTO mensajes (mecanico_id, remitente, asunto, texto, orden_id, fecha) VA
 (1, 'Recepción', 'Cliente del BMW', 'El dueño del BMW X5 pasa el viernes a las 4 p. m. Por favor dejarlo listo antes.', 11, '2026-10-24 09:00:00');
 
 -- El historial de movimientos arranca con lo que ya pasó (igual que en migraciones/006)
-INSERT INTO movimientos (tipo, descripcion, monto, orden_id, usuario, fecha)
+INSERT INTO movimientos (tipo, descripcion, monto, orden_id, usuario, fecha, pago_id)
 SELECT tipo, CASE tipo WHEN 'anticipo' THEN 'Anticipo' ELSE 'Pago' END || ' del proyecto #' || orden_id,
-       monto, orden_id, registrado_por, fecha
+       monto, orden_id, registrado_por, fecha, id
 FROM pagos;
 
 INSERT INTO movimientos (tipo, descripcion, cantidad, repuesto_id, orden_id, fecha)
@@ -359,4 +416,12 @@ SELECT 'repuesto_usado', r.nombre || ' × ' || d.cantidad || ' en el proyecto #'
        d.cantidad, d.repuesto_id, d.orden_id, o.fecha_ingreso || ' 08:00:00'
 FROM detalle_orden d JOIN repuestos r ON r.id = d.repuesto_id JOIN ordenes_servicio o ON o.id = d.orden_id;
 
-PRAGMA user_version = 7;
+-- Tareas de traslado de ejemplo para los auxiliares
+INSERT INTO tareas (tipo, titulo, detalle, taller_id, orden_id, vehiculo_id, creada_por, fecha) VALUES
+('traer_vehiculo', 'Traer HFG-6789 (Kia Sportage) al Taller Central',
+ 'El cliente lo deja en su casa en Col. Jardines; llamar antes al 3322-8899.', 1, 7, 7, 'recepcion', '2026-10-15 08:30:00');
+INSERT INTO tareas (tipo, titulo, detalle, repuesto_id, cantidad, creada_por, fecha) VALUES
+('recibir_producto', 'Recibir Filtro de aceite × 10 del proveedor',
+ 'Lo trae Repuestos del Norte; revisar que vengan sellados.', 1, 10, 'recepcion', '2026-10-20 09:00:00');
+
+PRAGMA user_version = 9;

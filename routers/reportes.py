@@ -1,6 +1,6 @@
 from typing import Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 
 from database import obtener_conexion
 from modelos import ReporteRespuesta, ResolverEntrada
@@ -15,6 +15,22 @@ router = APIRouter(prefix="/reportes", tags=["Reportes"], dependencies=[Depends(
 def listar_reportes(estado: Literal["abierto", "resuelto"] | None = None):
     with obtener_conexion() as con:
         return RepositorioReporte(con).listar(estado=estado)
+
+
+def respuesta_pdf(contenido: bytes, nombre: str) -> Response:
+    """El PDF se abre en el navegador; al guardarlo se llama como `nombre` (por ejemplo «reporte-3.pdf»)."""
+    return Response(
+        content=contenido,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{nombre}"'},
+    )
+
+
+@router.get("/{reporte_id}/pdf", response_class=Response)
+def pdf_del_reporte(reporte_id: int):
+    """Copia en PDF que se guardó al enviar el reporte."""
+    with obtener_conexion() as con:
+        return respuesta_pdf(RepositorioReporte(con).pdf(reporte_id), f"reporte-{reporte_id}.pdf")
 
 
 @router.post("/{reporte_id}/resolver", response_model=ReporteRespuesta)

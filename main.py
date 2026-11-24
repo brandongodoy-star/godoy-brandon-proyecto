@@ -21,6 +21,8 @@ from routers import (
     peticiones,
     reportes,
     repuestos,
+    talleres,
+    tareas,
     usuarios,
     vehiculos,
 )
@@ -50,6 +52,9 @@ app.include_router(peticiones.router)
 app.include_router(cobros.router)
 app.include_router(mensajes.router)
 app.include_router(movimientos.router)
+app.include_router(talleres.router)
+app.include_router(tareas.router)
+app.include_router(tareas.router_auxiliar)
 app.include_router(clientes.router)
 app.include_router(vehiculos.router)
 app.include_router(mecanicos.router)

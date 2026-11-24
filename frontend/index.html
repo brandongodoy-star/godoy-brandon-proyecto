@@ -12,7 +12,7 @@
     rel="stylesheet"
   />
   <!-- El número de versión obliga al navegador a bajar los archivos nuevos: súbalo al cambiarlos -->
-  <link rel="stylesheet" href="/estilos.css?v=12" />
+  <link rel="stylesheet" href="/estilos.css?v=17" />
 
   <!-- Aplica el tema guardado antes de pintar, para que la página no parpadee. -->
   <script>
@@ -104,11 +104,20 @@
 
     <main class="contenido">
       <header class="encabezado">
-        <div>
-          <p id="subtitulo-vista" class="subtitulo"></p>
-          <h1 id="titulo-vista"></h1>
+        <div class="encabezado-titulo">
+          <span id="icono-vista" class="icono-vista" aria-hidden="true"></span>
+          <div class="encabezado-textos">
+            <p id="area-vista" class="area-vista"></p>
+            <h1 id="titulo-vista"></h1>
+          </div>
         </div>
-        <div id="acciones-vista" class="acciones"></div>
+        <div class="encabezado-lado">
+          <span id="fecha-vista" class="fecha-vista"></span>
+          <div id="acciones-vista" class="acciones"></div>
+          <button type="button" id="boton-ayuda" class="boton-ayuda" aria-label="Ayuda de esta sección" title="Ayuda (?)">
+            <svg class="icono" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.6h.01"/></svg>
+          </button>
+        </div>
       </header>
       <div id="vista" class="vista" aria-live="polite"></div>
     </main>
@@ -116,8 +125,9 @@
 
   <dialog id="dialogo" class="dialogo"></dialog>
   <dialog id="confirmacion" class="dialogo dialogo-chico"></dialog>
+  <dialog id="ayuda" class="dialogo panel-ayuda" aria-label="Centro de ayuda"></dialog>
   <div id="avisos" class="avisos" popover="manual" aria-live="polite"></div>
 
-  <script src="/app.js?v=12"></script>
+  <script src="/app.js?v=17"></script>
 </body>
 </html>

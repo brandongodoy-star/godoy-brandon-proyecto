@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Response, status
 
 from database import obtener_conexion
 from modelos import (
     AnticipoRespuesta,
     CobroDetalle,
+    ComprobanteRespuesta,
     CobroProyecto,
     EstadoPago,
     MensajeRespuesta,
@@ -12,6 +13,7 @@ from modelos import (
     VentaRespuesta,
 )
 from repositorios import RepositorioPago, RepositorioVenta
+from routers.reportes import respuesta_pdf
 from seguridad import solo_administrador, solo_personal
 
 # Cobros: pagos y anticipos de los proyectos de taller, y venta de repuestos sueltos
@@ -42,6 +44,26 @@ def listar_anticipos():
     """Apartado de pagos anticipados: los abonos hechos antes de que el trabajo esté listo."""
     with obtener_conexion() as con:
         return RepositorioPago(con).anticipos()
+
+
+@router.get("/pagos/{pago_id}/pdf", response_class=Response, dependencies=[Depends(solo_personal)])
+def comprobante_de_pago(pago_id: int):
+    """Comprobante en PDF que se guardó al registrar el pago o el anticipo."""
+    with obtener_conexion() as con:
+        return respuesta_pdf(RepositorioPago(con).pdf(pago_id), f"comprobante-P-{pago_id:06d}.pdf")
+
+
+@router.get("/ventas/{venta_id}/pdf", response_class=Response, dependencies=[Depends(solo_personal)])
+def comprobante_de_venta(venta_id: int):
+    with obtener_conexion() as con:
+        return respuesta_pdf(RepositorioVenta(con).pdf(venta_id), f"comprobante-V-{venta_id:06d}.pdf")
+
+
+@router.get("/comprobantes", response_model=list[ComprobanteRespuesta], dependencies=[Depends(solo_administrador)])
+def archivo_de_comprobantes():
+    """Archivo de la administración: cada cobro con su comprobante en PDF y la nota del sistema."""
+    with obtener_conexion() as con:
+        return RepositorioPago(con).comprobantes()
 
 
 @router.delete("/pagos/{pago_id}", response_model=MensajeRespuesta)

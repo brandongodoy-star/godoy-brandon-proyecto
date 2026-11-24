@@ -45,6 +45,8 @@ def test_base_nueva_carga_datos_de_prueba(ruta_bd):
     assert contar(ruta_bd, "peticiones") == 1
     assert contar(ruta_bd, "mensajes") == 1
     assert contar(ruta_bd, "movimientos") == 16  # 4 pagos y 12 repuestos usados
+    assert contar(ruta_bd, "talleres") == 4  # 3 en el edificio y 1 de afuera
+    assert contar(ruta_bd, "tareas") == 2
     assert version(ruta_bd) == database.VERSION_BD
 
 

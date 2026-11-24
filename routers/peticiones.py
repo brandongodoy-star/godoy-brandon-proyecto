@@ -3,7 +3,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends
 
 from database import obtener_conexion
-from modelos import PeticionRespuesta, RechazoEntrada
+from modelos import EntregaRespuesta, PeticionRespuesta, RechazoEntrada
 from repositorios import RepositorioPeticion
 from seguridad import solo_personal
 
@@ -15,6 +15,13 @@ router = APIRouter(prefix="/peticiones", tags=["Peticiones de material"], depend
 def listar_peticiones(estado: Literal["pendiente", "enviada", "rechazada"] | None = None):
     with obtener_conexion() as con:
         return RepositorioPeticion(con).listar(estado=estado)
+
+
+@router.get("/entregas", response_model=list[EntregaRespuesta])
+def historial_de_entregas():
+    """Material enviado a los mecánicos: quién lo llevó y cuándo confirmaron que lo recibieron."""
+    with obtener_conexion() as con:
+        return RepositorioPeticion(con).entregas()
 
 
 @router.post("/{peticion_id}/enviar", response_model=PeticionRespuesta)

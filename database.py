@@ -8,7 +8,7 @@ RUTA_SCRIPT = os.path.join(CARPETA, "crear_bd.sql")
 CARPETA_MIGRACIONES = os.path.join(CARPETA, "migraciones")
 
 # Versión de la estructura que trae crear_bd.sql y migración que lleva a cada versión
-VERSION_BD = 7
+VERSION_BD = 9
 MIGRACIONES = {
     2: "002_roles_y_creditos.sql",
     3: "003_equipos.sql",
@@ -16,6 +16,8 @@ MIGRACIONES = {
     5: "005_mensajes.sql",
     6: "006_pagos_y_movimientos.sql",
     7: "007_fecha_limite.sql",
+    8: "008_operaciones.sql",
+    9: "009_talleres_y_comprobantes.sql",
 }
 
 
@@ -52,6 +54,14 @@ def inicializar_bd():
             ejecutar_script(con, RUTA_SCRIPT)
             return
         version = con.execute("PRAGMA user_version").fetchone()[0]
+        if version >= VERSION_BD:
+            return
+        # Algunas migraciones rehacen tablas que otras referencian: mientras migra se apagan las
+        # llaves foráneas (así lo pide SQLite) y al terminar se revisa que todo siga bien enlazado.
+        con.execute("PRAGMA foreign_keys = OFF")
         for numero, archivo in sorted(MIGRACIONES.items()):
             if numero > version:
                 ejecutar_script(con, os.path.join(CARPETA_MIGRACIONES, archivo))
+        con.execute("PRAGMA foreign_keys = ON")
+        if con.execute("PRAGMA foreign_key_check").fetchone():
+            raise RuntimeError("La migración dejó registros con referencias rotas")

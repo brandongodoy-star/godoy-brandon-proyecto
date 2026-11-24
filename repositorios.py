@@ -2,6 +2,8 @@ import sqlite3
 
 from fastapi import HTTPException
 
+from pdf import comprobante_pdf, reporte_pdf
+
 from creditos import (
     NOMBRE_CALIFICACION,
     NOMBRE_CATEGORIA,
@@ -25,6 +27,32 @@ COLUMNAS_PAGADOR = (
     "metodo", "referencia", "pagador_nombres", "pagador_apellidos", "pagador_identidad", "pagador_correo",
     "tarjeta_marca", "tarjeta_ultimos4", "tarjeta_titular", "autorizacion", "banco",
 )
+# Columnas de un pago sin el PDF (que pesa); el comprobante se pide aparte
+COLUMNAS_PAGO = ("id", "orden_id", "monto", "tipo", "registrado_por", "fecha", *COLUMNAS_PAGADOR)
+METODOS = {"efectivo": "Efectivo", "tarjeta": "Tarjeta", "transferencia": "Transferencia"}
+
+
+def dinero(valor: float) -> str:
+    return f"L {valor:,.2f}"
+
+
+def forma_de_pago(c: dict) -> list[tuple[str, str]]:
+    """Filas de «Forma de pago» del comprobante: de la tarjeta, solo la marca y los últimos 4 dígitos."""
+    filas = [("Método", METODOS.get(c["metodo"], c["metodo"]))]
+    if c["metodo"] == "tarjeta":
+        filas.append(("Tarjeta", f"{c['tarjeta_marca'] or 'Tarjeta'} terminada en {c['tarjeta_ultimos4'] or '----'}"))
+        if c.get("tarjeta_titular"):
+            filas.append(("Titular", c["tarjeta_titular"]))
+        filas.append(("Autorización", c.get("autorizacion") or "—"))
+    elif c["metodo"] == "transferencia":
+        filas += [("Banco", c.get("banco") or "—"), ("Referencia", c.get("referencia") or "—")]
+    elif c.get("referencia"):
+        filas.append(("Referencia", c["referencia"]))
+    return filas
+
+
+def nombre_pagador(c: dict) -> str:
+    return " ".join(p for p in (c.get("pagador_nombres"), c.get("pagador_apellidos")) if p) or "—"
 
 
 class RepositorioBase:
@@ -116,8 +144,20 @@ class RepositorioVehiculo(RepositorioBase):
 class RepositorioMecanico(RepositorioBase):
     tabla = "mecanicos"
     # Los créditos no se editan como un dato más: cambian con las calificaciones y los ajustes
-    columnas = ("nombre", "especialidad", "activo", "telefono", "correo", "fecha_contratacion")
+    columnas = ("nombre", "especialidad", "activo", "telefono", "correo", "fecha_contratacion", "taller_id")
     no_encontrado = "Mecánico no encontrado"
+
+    def crear(self, datos: dict) -> dict:
+        self._validar_taller(datos)
+        return super().crear(datos)
+
+    def actualizar(self, mecanico_id: int, datos: dict) -> dict:
+        self._validar_taller(datos)
+        return super().actualizar(mecanico_id, datos)
+
+    def _validar_taller(self, datos: dict) -> None:
+        if datos.get("taller_id") is not None:
+            RepositorioTaller(self.con).obtener_por_id(datos["taller_id"])
 
     def sumar_creditos(self, mecanico_id: int, orden_id: int | None, puntos: int, motivo: str) -> int:
         """Suma (o resta) créditos y deja la línea en el historial. Devuelve los créditos nuevos."""
@@ -511,8 +551,11 @@ class RepositorioReporte(RepositorioBase):
     columnas = ("mecanico_id", "orden_id", "tipo", "titulo", "descripcion", "sobre_mecanico_id")
     no_encontrado = "Reporte no encontrado"
 
+    # Sin la columna pdf (que pesa): solo se dice si la copia existe
     CONSULTA_COMPLETA = (
-        "SELECT r.*, m.nombre AS mecanico, s.nombre AS sobre_mecanico FROM reportes r "
+        "SELECT r.id, r.mecanico_id, r.orden_id, r.tipo, r.titulo, r.descripcion, r.estado, r.fecha, "
+        "r.sobre_mecanico_id, r.penalizacion, r.comentario, r.pdf IS NOT NULL AS tiene_pdf, "
+        "m.nombre AS mecanico, s.nombre AS sobre_mecanico FROM reportes r "
         "JOIN mecanicos m ON m.id = r.mecanico_id LEFT JOIN mecanicos s ON s.id = r.sobre_mecanico_id"
     )
 
@@ -538,6 +581,27 @@ class RepositorioReporte(RepositorioBase):
             self.con.execute(self.CONSULTA_COMPLETA + " WHERE r.id = ?", (reporte_id,)).fetchone()
         )
 
+    def guardar_pdf(self, reporte_id: int) -> None:
+        """Guarda junto al reporte una copia en PDF con la información con la que se envió."""
+        reporte = self.obtener_completo(reporte_id)
+        if reporte["orden_id"] is not None:
+            fila = self.con.execute(
+                "SELECT v.placa FROM ordenes_servicio o JOIN vehiculos v ON v.id = o.vehiculo_id WHERE o.id = ?",
+                (reporte["orden_id"],),
+            ).fetchone()
+            reporte["placa"] = fila["placa"] if fila else None
+        self.con.execute("UPDATE reportes SET pdf = ? WHERE id = ?", (reporte_pdf(reporte), reporte_id))
+
+    def pdf(self, reporte_id: int, mecanico_id: int | None = None) -> bytes:
+        """La copia en PDF. Un mecánico solo puede bajar las de sus propios reportes."""
+        reporte = self.obtener_por_id(reporte_id)
+        if mecanico_id is not None and reporte["mecanico_id"] != mecanico_id:
+            raise HTTPException(status_code=404, detail=self.no_encontrado)
+        if reporte["pdf"] is None:
+            self.guardar_pdf(reporte_id)
+            reporte = self.obtener_por_id(reporte_id)
+        return reporte["pdf"]
+
     def crear_de_mecanico(self, mecanico_id: int, datos: dict) -> dict:
         """Guarda el reporte y avisa a recepción. Solo puede mencionar órdenes del mismo mecánico."""
         if datos.get("orden_id") is not None:
@@ -552,6 +616,7 @@ class RepositorioReporte(RepositorioBase):
                 "mecanico_id": mecanico_id,
             }
         )
+        self.guardar_pdf(reporte["id"])
         return self.obtener_completo(reporte["id"])
 
     def resolver(self, reporte_id: int, penalizacion: int = 0, comentario: str | None = None) -> dict:
@@ -733,6 +798,7 @@ class RepositorioTrabajos:
             f"Reporte del líder {lider['nombre']} sobre {miembro['nombre']} (orden #{orden_id}): {datos['titulo']}",
             orden_id,
         )
+        reportes.guardar_pdf(reporte["id"])
         return reportes.obtener_completo(reporte["id"])
 
     def perfil(self, usuario: str) -> dict:
@@ -824,7 +890,8 @@ class RepositorioPeticion(RepositorioBase):
     no_encontrado = "Petición no encontrada"
 
     CONSULTA_COMPLETA = """
-        SELECT p.*, v.placa, m.nombre AS mecanico, r.nombre AS repuesto, r.existencia
+        SELECT p.*, v.placa, m.nombre AS mecanico, r.nombre AS repuesto, r.existencia,
+               (SELECT t.estado FROM tareas t WHERE t.peticion_id = p.id ORDER BY t.id DESC LIMIT 1) AS estado_traslado
         FROM peticiones p
         JOIN ordenes_servicio o ON o.id = p.orden_id
         JOIN vehiculos v ON v.id = o.vehiculo_id
@@ -862,16 +929,77 @@ class RepositorioPeticion(RepositorioBase):
             cantidad=peticion["cantidad"], repuesto_id=peticion["repuesto_id"],
             orden_id=peticion["orden_id"], usuario=usuario,
         )
+        # Los auxiliares reciben la tarea de llevar la pieza al taller del mecánico que la pidió
+        taller = self.con.execute(
+            "SELECT t.id, t.nombre FROM mecanicos m JOIN talleres t ON t.id = m.taller_id WHERE m.id = ?",
+            (peticion["mecanico_id"],),
+        ).fetchone()
+        destino = f"al {taller['nombre']}" if taller else f"al proyecto #{peticion['orden_id']}"
+        RepositorioTarea(self.con).crear(
+            {
+                "tipo": "entregar_pieza",
+                "titulo": f"Llevar {material} {destino}",
+                "detalle": f"Entregar a {peticion['mecanico']} para el proyecto #{peticion['orden_id']} ({peticion['placa']}).",
+                "taller_id": taller["id"] if taller else None,
+                "orden_id": peticion["orden_id"],
+                "repuesto_id": peticion["repuesto_id"],
+                "cantidad": peticion["cantidad"],
+                "peticion_id": peticion_id,
+                "creada_por": usuario,
+            }
+        )
+        # El mecánico recibe el aviso con el botón «Recibido»
         RepositorioMensaje(self.con).crear(
             {
                 "mecanico_id": peticion["mecanico_id"],
                 "remitente": "Recepción",
-                "asunto": f"Material enviado: {material}",
-                "texto": f"Recepción aceptó su solicitud y envió {material} al proyecto #{peticion['orden_id']}.",
+                "asunto": f"Producto enviado: {material}",
+                "texto": (
+                    f"Recepción aceptó su solicitud y envió {material} al proyecto #{peticion['orden_id']}. "
+                    f"Un auxiliar se lo llevará {destino}. Cuando lo tenga, presione «Recibido»."
+                ),
                 "orden_id": peticion["orden_id"],
+                "peticion_id": peticion_id,
             }
         )
         return self.obtener_completa(peticion_id)
+
+    def recibir(self, peticion_id: int, mecanico_id: int) -> dict:
+        """El mecánico confirma que le llegó el material; queda en el historial de entregas."""
+        peticion = self.obtener_por_id(peticion_id)
+        if peticion["mecanico_id"] != mecanico_id:
+            raise HTTPException(status_code=404, detail=self.no_encontrado)
+        if peticion["estado"] != "enviada":
+            raise HTTPException(status_code=400, detail="Esta solicitud todavía no fue enviada")
+        if peticion["recibida_en"]:
+            raise HTTPException(status_code=400, detail="Ya confirmó que recibió este material")
+        self.con.execute(
+            "UPDATE peticiones SET recibida_en = datetime('now', 'localtime') WHERE id = ?", (peticion_id,)
+        )
+        self.con.execute("UPDATE mensajes SET leido = 1 WHERE peticion_id = ?", (peticion_id,))
+        return self.obtener_completa(peticion_id)
+
+    def entregas(self) -> list[dict]:
+        """Material enviado a los mecánicos: el traslado del auxiliar y la confirmación de recibido."""
+        filas = self.con.execute(
+            """
+            SELECT p.id, p.orden_id, v.placa, m.nombre AS mecanico, ta.nombre AS taller, r.nombre AS repuesto,
+                   p.cantidad, p.fecha, p.fecha_respuesta, p.recibida_en,
+                   t.id AS tarea_id, t.estado AS estado_traslado, COALESCE(u.nombre, u.username) AS auxiliar,
+                   t.realizada_en AS entregada_en
+            FROM peticiones p
+            JOIN ordenes_servicio o ON o.id = p.orden_id
+            JOIN vehiculos v ON v.id = o.vehiculo_id
+            JOIN mecanicos m ON m.id = p.mecanico_id
+            JOIN repuestos r ON r.id = p.repuesto_id
+            LEFT JOIN talleres ta ON ta.id = m.taller_id
+            LEFT JOIN tareas t ON t.peticion_id = p.id
+            LEFT JOIN usuarios u ON u.id = t.asignado_a
+            WHERE p.estado = 'enviada'
+            ORDER BY p.fecha_respuesta DESC, p.id DESC
+            """
+        ).fetchall()
+        return [dict(fila) for fila in filas]
 
     def rechazar(self, peticion_id: int, respuesta: str) -> dict:
         self._exigir_pendiente(peticion_id)
@@ -918,15 +1046,16 @@ class RepositorioPago(RepositorioBase):
         RepositorioOrden(self.con).obtener_por_id(orden_id)
         fila = self.con.execute(self.CONSULTA_COBROS + " WHERE o.id = ?", (orden_id,)).fetchone()
         pagos = self.con.execute(
-            "SELECT * FROM pagos WHERE orden_id = ? ORDER BY fecha, id", (orden_id,)
+            f"SELECT {', '.join(COLUMNAS_PAGO)} FROM pagos WHERE orden_id = ? ORDER BY fecha, id", (orden_id,)
         ).fetchall()
         return {**self._con_saldo(fila), "pagos": [dict(pago) for pago in pagos]}
 
     def anticipos(self) -> list[dict]:
         """Todos los anticipos, del más reciente al más viejo, con el proyecto al que se abonaron."""
         filas = self.con.execute(
-            """
-            SELECT p.*, o.estado, o.fecha_limite, v.placa, v.marca, v.modelo, v.categoria, c.nombre AS cliente
+            f"""
+            SELECT {', '.join('p.' + c for c in COLUMNAS_PAGO)}, o.estado, o.fecha_limite, v.placa, v.marca, v.modelo,
+                   v.categoria, c.nombre AS cliente
             FROM pagos p
             JOIN ordenes_servicio o ON o.id = p.orden_id
             JOIN vehiculos v ON v.id = o.vehiculo_id
@@ -956,15 +1085,91 @@ class RepositorioPago(RepositorioBase):
                 detail="El trabajo todavía no está listo para cobrarse; registre un pago anticipado",
             )
         monto = round(datos["monto"], 2)
-        self.crear({**datos, "monto": monto, "orden_id": orden_id, "registrado_por": usuario})
+        pago = self.crear({**datos, "monto": monto, "orden_id": orden_id, "registrado_por": usuario})
         nombre = "Anticipo" if datos["tipo"] == "anticipo" else "Pago"
         RepositorioMovimiento(self.con).registrar(
             datos["tipo"],
             f"{nombre} del proyecto #{orden_id} · {datos['pagador_nombres']} {datos['pagador_apellidos']} "
             f"· {datos['metodo']}",
-            monto=monto, orden_id=orden_id, usuario=usuario,
+            monto=monto, orden_id=orden_id, usuario=usuario, pago_id=pago["id"],
         )
+        # El comprobante en PDF se guarda junto al pago
+        self.guardar_pdf(pago["id"])
         return self.cobro(orden_id)
+
+    def guardar_pdf(self, pago_id: int) -> None:
+        pago = self.obtener_por_id(pago_id)
+        proyecto = self.con.execute(
+            self.CONSULTA_COBROS + " WHERE o.id = ?", (pago["orden_id"],)
+        ).fetchone()
+        # Lo pagado hasta este comprobante (incluido), para que el saldo no cambie con pagos posteriores
+        pagado = self.con.execute(
+            "SELECT COALESCE(SUM(monto), 0) FROM pagos WHERE orden_id = ? AND id <= ?", (pago["orden_id"], pago_id)
+        ).fetchone()[0]
+        nota = self.con.execute(
+            "SELECT descripcion FROM movimientos WHERE pago_id = ? ORDER BY id LIMIT 1", (pago_id,)
+        ).fetchone()
+        es_anticipo = pago["tipo"] == "anticipo"
+        contenido = comprobante_pdf({
+            "tipo": pago["tipo"],
+            "numero": f"P-{pago_id:06d}",
+            "fecha": pago["fecha"],
+            "monto": pago["monto"],
+            "pagador": nombre_pagador(pago),
+            "identidad": pago["pagador_identidad"],
+            "correo": pago["pagador_correo"],
+            "concepto": [
+                ("Proyecto", f"#{proyecto['id']} · {proyecto['placa']} · {proyecto['marca']} {proyecto['modelo']}"),
+                ("Cliente", proyecto["cliente"]),
+                ("Tipo de cobro", "Pago anticipado (antes de que el trabajo esté listo)" if es_anticipo else "Pago del trabajo de taller"),
+            ],
+            "forma": forma_de_pago(pago),
+            "totales": [
+                ("Total del proyecto", dinero(proyecto["total"])),
+                ("Pagado hasta este cobro", dinero(pagado)),
+                ("Saldo pendiente", dinero(max(0, round(proyecto["total"] - pagado, 2)))),
+            ],
+            "registrado_por": pago["registrado_por"],
+            "nota": nota["descripcion"] if nota else f"{'Anticipo' if es_anticipo else 'Pago'} del proyecto #{pago['orden_id']}",
+        })
+        self.con.execute("UPDATE pagos SET pdf = ? WHERE id = ?", (contenido, pago_id))
+
+    def pdf(self, pago_id: int) -> bytes:
+        """El comprobante del pago; si es de antes de que existieran, se genera la primera vez."""
+        if self.obtener_por_id(pago_id)["pdf"] is None:
+            self.guardar_pdf(pago_id)
+        return self.obtener_por_id(pago_id)["pdf"]
+
+    def comprobantes(self) -> list[dict]:
+        """Todos los cobros (pagos, anticipos y ventas) con su nota del sistema, del más reciente al más viejo."""
+        filas = self.con.execute(
+            """
+            SELECT 'pago' AS origen, p.id AS id, p.tipo AS tipo, p.fecha AS fecha, p.monto AS monto, p.metodo AS metodo,
+                   p.pagador_nombres, p.pagador_apellidos, p.pagador_identidad AS identidad,
+                   'Proyecto #' || p.orden_id || ' · ' || v.placa || ' · ' || v.marca || ' ' || v.modelo AS concepto,
+                   p.orden_id, p.registrado_por,
+                   COALESCE((SELECT m.descripcion FROM movimientos m WHERE m.pago_id = p.id ORDER BY m.id LIMIT 1),
+                            CASE p.tipo WHEN 'anticipo' THEN 'Anticipo' ELSE 'Pago' END || ' del proyecto #' || p.orden_id) AS nota
+            FROM pagos p JOIN ordenes_servicio o ON o.id = p.orden_id JOIN vehiculos v ON v.id = o.vehiculo_id
+            UNION ALL
+            SELECT 'venta', x.id, 'venta', x.fecha, x.total, x.metodo,
+                   x.pagador_nombres, x.pagador_apellidos, x.pagador_identidad,
+                   r.nombre || ' × ' || x.cantidad, NULL, x.registrado_por,
+                   COALESCE((SELECT m.descripcion FROM movimientos m WHERE m.venta_id = x.id ORDER BY m.id LIMIT 1),
+                            'Venta de ' || r.nombre || ' × ' || x.cantidad)
+            FROM ventas x JOIN repuestos r ON r.id = x.repuesto_id
+            ORDER BY fecha DESC, id DESC
+            """
+        ).fetchall()
+        comprobantes = []
+        for fila in filas:
+            c = dict(fila)
+            letra, ruta = ("P", "pagos") if c.pop("origen") == "pago" else ("V", "ventas")
+            c["numero"] = f"{letra}-{c['id']:06d}"
+            c["pagador"] = nombre_pagador(c)
+            c["pdf"] = f"/{ruta}/{c['id']}/pdf"
+            comprobantes.append(c)
+        return comprobantes
 
     def anular(self, pago_id: int, usuario: str) -> None:
         pago = self.obtener_por_id(pago_id)
@@ -995,10 +1200,13 @@ class RepositorioMensaje(RepositorioBase):
     mecánico; «direccion» dice si lo envió recepción (a_mecanico) o el mecánico (a_recepcion)."""
 
     tabla = "mensajes"
-    columnas = ("mecanico_id", "remitente", "asunto", "texto", "orden_id", "direccion")
+    columnas = ("mecanico_id", "remitente", "asunto", "texto", "orden_id", "direccion", "peticion_id")
     no_encontrado = "Mensaje no encontrado"
 
-    CONSULTA_COMPLETA = "SELECT x.*, m.nombre AS mecanico FROM mensajes x JOIN mecanicos m ON m.id = x.mecanico_id"
+    CONSULTA_COMPLETA = (
+        "SELECT x.*, m.nombre AS mecanico, pe.recibida_en FROM mensajes x "
+        "JOIN mecanicos m ON m.id = x.mecanico_id LEFT JOIN peticiones pe ON pe.id = x.peticion_id"
+    )
 
     def enviar(self, mecanico_ids: list[int], datos: dict, remitente: str) -> list[dict]:
         """Recepción manda el mismo mensaje a cada mecánico de la lista."""
@@ -1064,7 +1272,11 @@ class RepositorioVenta(RepositorioBase):
     columnas = ("repuesto_id", "cantidad", "precio_unitario", "total", *COLUMNAS_PAGADOR, "registrado_por")
     no_encontrado = "Venta no encontrada"
 
-    CONSULTA_COMPLETA = "SELECT x.*, r.nombre AS repuesto FROM ventas x JOIN repuestos r ON r.id = x.repuesto_id"
+    CONSULTA_COMPLETA = (
+        "SELECT x.id, x.repuesto_id, x.cantidad, x.precio_unitario, x.total, x.registrado_por, x.fecha, "
+        + ", ".join("x." + c for c in COLUMNAS_PAGADOR)
+        + ", r.nombre AS repuesto FROM ventas x JOIN repuestos r ON r.id = x.repuesto_id"
+    )
 
     def vender(self, datos: dict, usuario: str) -> dict:
         repuesto = RepositorioRepuesto(self.con).obtener_por_id(datos["repuesto_id"])
@@ -1083,9 +1295,40 @@ class RepositorioVenta(RepositorioBase):
             "venta",
             f"Venta de {repuesto['nombre']} × {datos['cantidad']} · "
             f"{datos['pagador_nombres']} {datos['pagador_apellidos']} · {datos['metodo']}",
-            monto=total, cantidad=datos["cantidad"], repuesto_id=repuesto["id"], usuario=usuario,
+            monto=total, cantidad=datos["cantidad"], repuesto_id=repuesto["id"], usuario=usuario, venta_id=venta["id"],
         )
+        self.guardar_pdf(venta["id"])
         return self.obtener_completa(venta["id"])
+
+    def guardar_pdf(self, venta_id: int) -> None:
+        venta = self.obtener_completa(venta_id)
+        nota = self.con.execute(
+            "SELECT descripcion FROM movimientos WHERE venta_id = ? ORDER BY id LIMIT 1", (venta_id,)
+        ).fetchone()
+        contenido = comprobante_pdf({
+            "tipo": "venta",
+            "numero": f"V-{venta_id:06d}",
+            "fecha": venta["fecha"],
+            "monto": venta["total"],
+            "pagador": nombre_pagador(venta),
+            "identidad": venta["pagador_identidad"],
+            "correo": venta["pagador_correo"],
+            "concepto": [
+                ("Producto", venta["repuesto"]),
+                ("Cantidad", str(venta["cantidad"])),
+                ("Precio unitario", dinero(venta["precio_unitario"])),
+                ("Total", dinero(venta["total"])),
+            ],
+            "forma": forma_de_pago(venta),
+            "registrado_por": venta["registrado_por"],
+            "nota": nota["descripcion"] if nota else f"Venta de {venta['repuesto']} × {venta['cantidad']}",
+        })
+        self.con.execute("UPDATE ventas SET pdf = ? WHERE id = ?", (contenido, venta_id))
+
+    def pdf(self, venta_id: int) -> bytes:
+        if self.obtener_por_id(venta_id)["pdf"] is None:
+            self.guardar_pdf(venta_id)
+        return self.obtener_por_id(venta_id)["pdf"]
 
     def listar(self) -> list[dict]:
         return [dict(fila) for fila in self.con.execute(self.CONSULTA_COMPLETA + " ORDER BY x.id DESC")]
@@ -1099,7 +1342,7 @@ class RepositorioMovimiento(RepositorioBase):
     """Historial de movimientos: pagos, ventas, solicitudes aceptadas y repuestos usados o devueltos."""
 
     tabla = "movimientos"
-    columnas = ("tipo", "descripcion", "monto", "cantidad", "repuesto_id", "orden_id", "usuario")
+    columnas = ("tipo", "descripcion", "monto", "cantidad", "repuesto_id", "orden_id", "usuario", "pago_id", "venta_id")
     no_encontrado = "Movimiento no encontrado"
 
     def registrar(self, tipo: str, descripcion: str, **campos) -> None:
@@ -1113,3 +1356,144 @@ class RepositorioMovimiento(RepositorioBase):
             [*(tipos or []), limite],
         ).fetchall()
         return [dict(fila) for fila in filas]
+
+
+class RepositorioTaller(RepositorioBase):
+    """Sedes del taller. Cada mecánico trabaja en una."""
+
+    tabla = "talleres"
+    columnas = ("nombre", "ubicacion", "direccion", "telefono", "encargado", "horario", "capacidad", "activo")
+    no_encontrado = "Taller no encontrado"
+
+    CONSULTA = """
+        SELECT t.*, (SELECT COUNT(*) FROM mecanicos m WHERE m.taller_id = t.id AND m.activo = 1) AS mecanicos
+        FROM talleres t
+    """
+
+    def listar(self) -> list[dict]:
+        return [dict(fila) for fila in self.con.execute(self.CONSULTA + " ORDER BY t.id").fetchall()]
+
+    def obtener_completo(self, taller_id: int) -> dict:
+        self.obtener_por_id(taller_id)
+        return dict(self.con.execute(self.CONSULTA + " WHERE t.id = ?", (taller_id,)).fetchone())
+
+    def eliminar(self, taller_id: int) -> None:
+        self.obtener_por_id(taller_id)
+        if self.con.execute("SELECT 1 FROM mecanicos WHERE taller_id = ?", (taller_id,)).fetchone():
+            raise HTTPException(
+                status_code=400, detail="El taller tiene mecánicos: cámbielos de taller antes de eliminarlo"
+            )
+        self.con.execute("DELETE FROM talleres WHERE id = ?", (taller_id,))
+
+
+class RepositorioTarea(RepositorioBase):
+    """Tareas de los auxiliares de operaciones y traslado.
+
+    pendiente → (el auxiliar la acepta) → aceptada → (la termina) → realizada.
+    Una tarea sin auxiliar le aparece a todos; la toma el primero que la acepte.
+    """
+
+    tabla = "tareas"
+    columnas = (
+        "tipo", "titulo", "detalle", "taller_id", "orden_id", "vehiculo_id", "repuesto_id", "cantidad",
+        "peticion_id", "asignado_a", "creada_por",
+    )
+    no_encontrado = "Tarea no encontrada"
+
+    CONSULTA = """
+        SELECT t.*, ta.nombre AS taller, ta.direccion AS taller_direccion, v.placa,
+               v.marca || ' ' || v.modelo AS vehiculo, r.nombre AS repuesto,
+               COALESCE(u.nombre, u.username) AS auxiliar
+        FROM tareas t
+        LEFT JOIN talleres ta ON ta.id = t.taller_id
+        LEFT JOIN vehiculos v ON v.id = t.vehiculo_id
+        LEFT JOIN repuestos r ON r.id = t.repuesto_id
+        LEFT JOIN usuarios u ON u.id = t.asignado_a
+    """
+    ORDEN = " ORDER BY CASE t.estado WHEN 'pendiente' THEN 0 WHEN 'aceptada' THEN 1 ELSE 2 END, t.id DESC"
+
+    def listar(self, estado: str | None = None) -> list[dict]:
+        donde, valores = (" WHERE t.estado = ?", [estado]) if estado else ("", [])
+        return [dict(fila) for fila in self.con.execute(self.CONSULTA + donde + self.ORDEN, valores).fetchall()]
+
+    def de_auxiliar(self, usuario_id: int) -> list[dict]:
+        """Las tareas del auxiliar y las pendientes que todavía no tienen a nadie."""
+        filas = self.con.execute(
+            self.CONSULTA + " WHERE t.asignado_a = ? OR (t.asignado_a IS NULL AND t.estado = 'pendiente')" + self.ORDEN,
+            (usuario_id,),
+        ).fetchall()
+        return [dict(fila) for fila in filas]
+
+    def obtener_completa(self, tarea_id: int) -> dict:
+        self.obtener_por_id(tarea_id)
+        return dict(self.con.execute(self.CONSULTA + " WHERE t.id = ?", (tarea_id,)).fetchone())
+
+    def auxiliares(self) -> list[dict]:
+        filas = self.con.execute(
+            "SELECT id, username, nombre FROM usuarios WHERE rol = 'auxiliar' ORDER BY COALESCE(nombre, username)"
+        ).fetchall()
+        return [dict(fila) for fila in filas]
+
+    def crear_de_recepcion(self, datos: dict, usuario: str) -> dict:
+        """Recepción asigna una tarea: recibir producto nuevo, traer o llevar un vehículo, u otra."""
+        if datos.get("asignado_a") is not None and not self.con.execute(
+            "SELECT 1 FROM usuarios WHERE id = ? AND rol = 'auxiliar'", (datos["asignado_a"],)
+        ).fetchone():
+            raise HTTPException(status_code=404, detail="Auxiliar no encontrado")
+        taller = RepositorioTaller(self.con).obtener_por_id(datos["taller_id"]) if datos.get("taller_id") else None
+        if datos.get("orden_id") is not None:
+            orden = RepositorioOrden(self.con).obtener_por_id(datos["orden_id"])
+            datos["vehiculo_id"] = datos.get("vehiculo_id") or orden["vehiculo_id"]
+        vehiculo = RepositorioVehiculo(self.con).obtener_por_id(datos["vehiculo_id"]) if datos.get("vehiculo_id") else None
+        repuesto = RepositorioRepuesto(self.con).obtener_por_id(datos["repuesto_id"]) if datos.get("repuesto_id") else None
+        if not datos.get("titulo"):
+            auto = f"{vehiculo['placa']} ({vehiculo['marca']} {vehiculo['modelo']})" if vehiculo else ""
+            datos["titulo"] = {
+                "recibir_producto": lambda: f"Recibir {repuesto['nombre']} × {datos['cantidad']} del proveedor",
+                "traer_vehiculo": lambda: f"Traer {auto} al {taller['nombre']}",
+                "llevar_vehiculo": lambda: f"Llevar {auto} del {taller['nombre']} al cliente",
+            }[datos["tipo"]]()
+        tarea = self.crear({**datos, "creada_por": usuario})
+        return self.obtener_completa(tarea["id"])
+
+    def cancelar(self, tarea_id: int) -> None:
+        tarea = self.obtener_por_id(tarea_id)
+        if tarea["estado"] != "pendiente":
+            raise HTTPException(status_code=400, detail="Solo se cancela una tarea que nadie ha aceptado")
+        if tarea["peticion_id"] is not None:
+            raise HTTPException(
+                status_code=400, detail="La entrega de una pieza aprobada no se cancela: el mecánico la está esperando"
+            )
+        self.con.execute("DELETE FROM tareas WHERE id = ?", (tarea_id,))
+
+    def aceptar(self, tarea_id: int, usuario_id: int) -> dict:
+        tarea = self._visible(tarea_id, usuario_id)
+        if tarea["estado"] != "pendiente":
+            raise HTTPException(status_code=400, detail="Esta tarea ya fue aceptada")
+        self.con.execute(
+            "UPDATE tareas SET asignado_a = ?, estado = 'aceptada', aceptada_en = datetime('now', 'localtime') WHERE id = ?",
+            (usuario_id, tarea_id),
+        )
+        return self.obtener_completa(tarea_id)
+
+    def realizar(self, tarea_id: int, usuario_id: int, nota: str | None) -> dict:
+        """El auxiliar la marca como realizada. Si era recibir producto, entra al almacén."""
+        tarea = self._visible(tarea_id, usuario_id)
+        if tarea["estado"] != "aceptada" or tarea["asignado_a"] != usuario_id:
+            raise HTTPException(status_code=400, detail="Primero acepte la tarea en su bandeja")
+        if tarea["tipo"] == "recibir_producto" and tarea["repuesto_id"] is not None:
+            self.con.execute(
+                "UPDATE repuestos SET existencia = existencia + ? WHERE id = ?", (tarea["cantidad"], tarea["repuesto_id"])
+            )
+        self.con.execute(
+            "UPDATE tareas SET estado = 'realizada', nota = ?, realizada_en = datetime('now', 'localtime') WHERE id = ?",
+            (nota, tarea_id),
+        )
+        return self.obtener_completa(tarea_id)
+
+    def _visible(self, tarea_id: int, usuario_id: int) -> dict:
+        """Una tarea de otro auxiliar responde como si no existiera."""
+        tarea = self.obtener_por_id(tarea_id)
+        if tarea["asignado_a"] not in (None, usuario_id):
+            raise HTTPException(status_code=404, detail=self.no_encontrado)
+        return tarea
